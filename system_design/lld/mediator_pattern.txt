@@ -1,0 +1,133 @@
+Here is a cleanly structured set of notes for the Mediator Pattern, highlighting the many-to-many communication model and centralized routing.
+
+Mediator Pattern: Chatroom / Multi-User Example
+The Problem: O(N 
+2
+ ) Direct Connections
+When multiple components of the same type (e.g., users, chat participants, or UI widgets) need to send and receive messages among each other, connecting them directly creates a web of dependencies.
+
+If every user must individually subscribe to every other publisher of the same type:
+
+3 users requires 6 individual subscription links: user1.addSubscriber(user2), user1.addSubscriber(user3), etc.
+
+N participants require N(N−1) connections, scaling exponentially (O(N 
+2
+ )).
+
+Direct Peer-to-Peer Coupling (Messy Mesh)
+[User 1] <-----> [User 2]
+   ^               ^
+   |    x     x    |
+   v               v
+[User 3] <-----> [User 4]
+The Solution: Centralized Many-to-Many Hub
+The Mediator Pattern introduces a single central coordinator. Instead of subscribing to N−1 individual publishers separately, subscribers connect to a single central source (the Mediator). By registering once with the Mediator, a subscriber implicitly listens to all publishers of that type.
+
+Mediator Topology (Hub and Spoke)
+[User 1] \             / [User 2]
+          [ MEDIATOR ]
+[User 3] /             \ [User 4]
+1. Define the Core Interfaces
+Define the Mediator interface that manages routing and the Colleague class where objects act as both publishers and subscribers.
+
+Java
+import java.util.ArrayList;
+import java.util.List;
+
+// The Mediator interface
+public interface ChatMediator {
+    void registerUser(User user);
+    void sendMessage(String message, User sender);
+}
+
+// The Colleague (acts as both publisher and subscriber)
+public abstract class User {
+    protected ChatMediator mediator;
+    protected String name;
+
+    public User(ChatMediator mediator, String name) {
+        this.mediator = mediator;
+        this.name = name;
+    }
+
+    public abstract void send(String message);
+    public abstract void receive(String message, String senderName);
+    
+    public String getName() { return name; }
+}
+2. Implement the Concrete Mediator
+The Mediator holds references to all participants and acts as the central router.
+
+Java
+public class ChatRoomMediator implements ChatMediator {
+    private List<User> users = new ArrayList<>();
+
+    @Override
+    public void registerUser(User user) {
+        // Single point of registration
+        this.users.add(user);
+    }
+
+    @Override
+    public void sendMessage(String message, User sender) {
+        // Route the published message to all other registered subscribers
+        for (User receiver : users) {
+            // Don't send the message back to the publisher
+            if (receiver != sender) {
+                receiver.receive(message, sender.getName());
+            }
+        }
+    }
+}
+3. Implement Concrete Participants
+Concrete users send messages through the Mediator rather than keeping direct references to other users.
+
+Java
+public class ChatUser extends User {
+    public ChatUser(ChatMediator mediator, String name) {
+        super(mediator, name);
+    }
+
+    @Override
+    public void send(String message) {
+        System.out.println("\n[" + this.name + " broadcasts]: " + message);
+        mediator.sendMessage(message, this);
+    }
+
+    @Override
+    public void receive(String message, String senderName) {
+        System.out.println(this.name + " received from " + senderName + ": " + message);
+    }
+}
+4. The Execution (Client Code)
+Notice that registering 3 users requires only 3 registration calls instead of 6 manual peer-to-peer subscriptions.
+
+Java
+public class MediatorDemo {
+    public static void main(String[] args) {
+        ChatMediator chatRoom = new ChatRoomMediator();
+
+        User user1 = new ChatUser(chatRoom, "Alice");
+        User user2 = new ChatUser(chatRoom, "Bob");
+        User user3 = new ChatUser(chatRoom, "Charlie");
+
+        // Exactly 3 registration calls (O(N) connection complexity)
+        chatRoom.registerUser(user1);
+        chatRoom.registerUser(user2);
+        chatRoom.registerUser(user3);
+
+        // Alice publishes; Mediator broadcasts to Bob and Charlie automatically
+        user1.send("Hello everyone!");
+
+        // Charlie publishes; Mediator broadcasts to Alice and Bob automatically
+        user3.send("Hey Alice!");
+    }
+}
+Key Architectural Benefits
+Single Source Listener: Subscribers register with the Mediator once to listen to all publishers of the same type, removing the need to manage N−1 direct subscriptions.
+
+Linear Connection Complexity: Scales linearly at O(N) connections instead of exponentially at O(N 
+2
+ ).
+
+Centralized Business Rules: Filtering, message logging, muting, or rate-limiting logic can be added inside the Mediator without touching any of the participant classes.
