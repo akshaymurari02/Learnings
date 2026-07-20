@@ -156,4 +156,18 @@ Single Responsibility Principle (SRP): The logic associated with a particular st
 
 Open/Closed Principle (OCP): You can add new states (e.g., ReadOnlyState, AutoSavingState) without modifying existing state classes or the MCADDocument class.
 
+State Pattern vs. Strategy Pattern
+While the State pattern looks structurally identical to the Strategy pattern from a high level (both hold a reference to an interface and delegate execution to concrete classes), they differ fundamentally in intent, state transitions, and class coupling:
+
+Dimension	Strategy Pattern	State Pattern
+Primary Intent	Swap how an algorithm executes (interchangeable tools).	Change how an object behaves as its internal status changes.
+Transitions	Managed externally by the client or context. Strategies do not swap themselves.	Managed internally by the concrete state classes (doc.setState(new SavedState())).
+Class Coupling	Concrete strategies are completely isolated and unaware of each other.	Concrete states often know about and instantiate sibling states to handle lifecycle flows.
+Client Awareness	Client explicitly selects and injects the strategy to use.	Client interacts with the Context (doc.save()) without managing internal state object swaps.
+Architectural Key Takeaway
+Use Strategy when you want to offer interchangeable algorithms for a single task (e.g., swapping STEPExporter for IGESExporter).
+
+Use State when an object's behavior changes dynamically as it progresses through a lifecycle or workflow (Open → Not Saved → Saved).
+
+
 Elimination of Conditional Complexity: Replaces large, error-prone if-else or switch statements with polymorphism, making state transitions explicit and self-contained.
