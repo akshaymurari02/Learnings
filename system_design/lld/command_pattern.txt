@@ -1,0 +1,162 @@
+Here is a cleanly structured set of notes for the Command Pattern, highlighting the Remote & Multi-Receiver problem, along with a comparison against the Strategy Pattern.
+
+Command Pattern: Universal Remote Example
+The Problem: Tightly Coupled Invoker and Receivers
+Imagine building a universal Remote Control (Invoker) that controls a TV, a Light, and a Stereo (Receivers).
+
+If the Remote class directly references each receiver:
+
+Hardcoding tv.turnOn() or light.dim() inside remote button handlers tightly couples the Remote to every specific device class.
+
+Reassigning a button to a different device requires modifying the RemoteControl class.
+
+Supporting macro actions (one button press doing multiple things) or undo functionality becomes a tangled web of conditional logic.
+
+Direct Coupling (Rigid)
+[ Remote Control ] ----> [ TV ]
+                   ----> [ Light ]
+                   ----> [ Stereo ]
+The Solution: Encapsulating Requests as Objects
+The Command Pattern decouples the Invoker (the remote) from the Receivers (TV, Light, Stereo) by wrapping the action and the receiver target inside a standardized Command object.
+
+Command Pattern Topology
+[ Invoker: Remote ] ---> [ Command Interface ] <--- [ TVOnCommand ] ---> [ Receiver: TV ]
+1. Define the Command Interface & Receivers
+Java
+// The Command interface with Undo support
+public interface Command {
+    void execute();
+    void undo();
+}
+
+// Receiver 1: TV
+public class TV {
+    public void turnOn() { System.out.println("TV is ON"); }
+    public void turnOff() { System.out.println("TV is OFF"); }
+}
+
+// Receiver 2: Light
+public class Light {
+    private int brightness = 0;
+
+    public void setBrightness(int level) {
+        this.brightness = level;
+        System.out.println("Light set to " + brightness + "%");
+    }
+    public int getBrightness() { return brightness; }
+}
+2. Implement Concrete Commands
+Each concrete command holds a reference to a specific receiver and records any state required for an undo() operation.
+
+Java
+// Command for TV
+public class TVOnCommand implements Command {
+    private TV tv;
+
+    public TVOnCommand(TV tv) {
+        this.tv = tv;
+    }
+
+    @Override
+    public void execute() { tv.turnOn(); }
+
+    @Override
+    public void undo() { tv.turnOff(); }
+}
+
+// Command for Light (Tracks state history for undo)
+public class DimLightCommand implements Command {
+    private Light light;
+    private int prevBrightness;
+    private int newBrightness;
+
+    public DimLightCommand(Light light, int newBrightness) {
+        this.light = light;
+        this.newBrightness = newBrightness;
+    }
+
+    @Override
+    public void execute() {
+        prevBrightness = light.getBrightness(); // Save state before executing
+        light.setBrightness(newBrightness);
+    }
+
+    @Override
+    public void undo() {
+        light.setBrightness(prevBrightness); // Restore previous state
+    }
+}
+3. Implement the Invoker (With History Support)
+A single RemoteControl instance can manage multiple slots and maintain a history stack for undo operations.
+
+Java
+import java.util.Stack;
+
+public class RemoteControl {
+    private Command[] slots;
+    private Stack<Command> history = new Stack<>();
+
+    public RemoteControl(int slotCount) {
+        slots = new Command[slotCount];
+    }
+
+    public void setCommand(int slot, Command command) {
+        slots[slot] = command;
+    }
+
+    public void pressButton(int slot) {
+        if (slots[slot] != null) {
+            slots[slot].execute();
+            history.push(slots[slot]); // Save to state history
+        }
+    }
+
+    public void pressUndo() {
+        if (!history.isEmpty()) {
+            Command lastCommand = history.pop();
+            System.out.print("[UNDO]: ");
+            lastCommand.undo();
+        }
+    }
+}
+4. The Execution (Client Code)
+Java
+public class CommandDemo {
+    public static void main(String[] args) {
+        // Receivers
+        TV livingRoomTV = new TV();
+        Light kitchenLight = new Light();
+
+        // Commands (Pairing Receivers to Actions)
+        Command tvOn = new TVOnCommand(livingRoomTV);
+        Command dimLight = new DimLightCommand(kitchenLight, 50);
+
+        // Single Invoker instance holding dynamic slots
+        RemoteControl remote = new RemoteControl(2);
+        remote.setCommand(0, tvOn);
+        remote.setCommand(1, dimLight);
+
+        // Usage
+        remote.pressButton(0); // Outputs: TV is ON
+        remote.pressButton(1); // Outputs: Light set to 50%
+
+        // Reversible execution using State History
+        remote.pressUndo();    // Outputs: [UNDO]: Light set to 0%
+    }
+}
+Command vs. Strategy Pattern
+It is common to confuse Command and Strategy because both encapsulate execution logic behind a method like .execute().
+
+Technically, you could treat button actions as interchangeable strategies (remote.setStrategy(Strategy s)). However, Strategy falls short for this specific problem:
+
+Dimension	Strategy Pattern	Command Pattern
+Primary Intent	Encapsulate how an algorithm works (e.g., Credit Card vs. UPI sorting logic).	Encapsulate what request to perform, who receives it, and how to undo it.
+Receiver Awareness	Strategy operates within a known Context; it rarely binds to distinct external receivers.	Command explicitly binds a Receiver instance to a specific method call.
+State History	Stateless or transient; used for one-off computation paths.	Stateful; ideal for building Undo/Redo stacks, request queues, and transaction logs.
+Invoker Configuration	Typically holds one strategy for a specific context task.	A single Invoker instance can hold multiple slots/queues of distinct commands.
+Why Command overcomes Strategy for Invokers:
+Single Invoker, Multiple Targets: A single Remote instance can store distinct Command instances across multiple slots/buttons simultaneously.
+
+State History & Reversibility: Because commands encapsulate the receiver state prior to execution, maintaining a Stack<Command> enables multi-level Undo/Redo functionality.
+
+First-Class Operations: Commands turn actions into standard data objects. You can queue them (job schedulers), delay their execution, or combine them into a MacroCommand (a single button execution running a list of 5 commands in sequence).
