@@ -1,0 +1,104 @@
+Observer Pattern: News Publisher Example
+The Problem: Tightly Coupled Notifications
+Imagine a TechNewsPublisher that needs to notify different platforms (Email, Mobile App, and a Website) whenever breaking news happens. If the publisher class holds direct references to EmailService, MobilePushService, and WebsiteWidget, the classes become tightly coupled. Every time a new platform needs to be notified (like a Discord bot), you have to modify the publisher's core code, breaking the Open/Closed Principle.
+
+The Solution: Publish-Subscribe Decoupling
+The Observer Pattern is incredibly useful for one-to-many relationships where publishers (subjects) and subscribers (observers) are completely decoupled. The publisher simply maintains a list of generic subscribers. When an event occurs, it broadcasts a notification to everyone on the list without needing to know who they are or what they do with the data.
+
+1. Define the Core Interfaces
+Define the Subject (Publisher) that manages subscriptions, and the Observer (Subscriber) that receives updates.
+
+Java
+// The Subscriber (Observer)
+public interface Observer {
+    void update(String headline);
+}
+
+// The Publisher (Subject)
+public interface Subject {
+    void subscribe(Observer observer);
+    void unsubscribe(Observer observer);
+    void notifyObservers();
+}
+2. Implement the Concrete Publisher
+The publisher holds a list of generic Observer objects. It does not contain any business logic about the email system or mobile app.
+
+Java
+import java.util.ArrayList;
+import java.util.List;
+
+public class TechNewsPublisher implements Subject {
+    private List<Observer> subscribers = new ArrayList<>();
+    private String latestHeadline;
+
+    @Override
+    public void subscribe(Observer observer) {
+        subscribers.add(observer);
+    }
+
+    @Override
+    public void unsubscribe(Observer observer) {
+        subscribers.remove(observer);
+    }
+
+    @Override
+    public void notifyObservers() {
+        for (Observer subscriber : subscribers) {
+            subscriber.update(latestHeadline);
+        }
+    }
+
+    // State change triggers the broadcast
+    public void publishNews(String headline) {
+        this.latestHeadline = headline;
+        System.out.println("\n--- Publishing News: " + headline + " ---");
+        notifyObservers();
+    }
+}
+3. Implement Concrete Subscribers
+Each platform implements the Observer interface, defining how it reacts to the notification.
+
+Java
+public class EmailSubscriber implements Observer {
+    @Override
+    public void update(String headline) {
+        System.out.println("Email sent to user: Breaking News - " + headline);
+    }
+}
+
+public class MobileAppSubscriber implements Observer {
+    @Override
+    public void update(String headline) {
+        System.out.println("Push notification sent: " + headline);
+    }
+}
+4. The Execution (Client Code)
+Subscribers can be added or removed dynamically at runtime without affecting the publisher.
+
+Java
+public class ObserverDemo {
+    public static void main(String[] args) {
+        TechNewsPublisher publisher = new TechNewsPublisher();
+
+        Observer emailSub = new EmailSubscriber();
+        Observer mobileSub = new MobileAppSubscriber();
+
+        // 1-to-Many Registration
+        publisher.subscribe(emailSub);
+        publisher.subscribe(mobileSub);
+
+        // Publisher broadcasts to all decoupled subscribers
+        publisher.publishNews("Java 25 Released!");
+
+        // Dynamic deregistration
+        publisher.unsubscribe(emailSub);
+        
+        publisher.publishNews("Observer Pattern Saves the Day.");
+    }
+}
+Key Architectural Benefits
+Loose Coupling: The publisher knows nothing about the concrete subscribers—it only knows they implement the Observer interface.
+
+Dynamic 1-to-Many Relationships: You can add or remove subscribers at runtime based on user actions (e.g., a user toggling "Turn on notifications" in a UI).
+
+Open/Closed Principle: You can add infinite new subscriber types (e.g., DiscordBotSubscriber) without ever modifying the TechNewsPublisher code.
