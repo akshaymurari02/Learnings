@@ -1,0 +1,159 @@
+State Pattern: MCAD Document Lifecycle Example
+The Problem: Tangled State-Dependent Conditionals
+In an MCAD application, a 3D model document behaves differently depending on its current state (Open, Not Saved / Dirty, Saved).
+
+If you handle this inside the MCADDocument class using if-else or switch statements, every single operation (edit, save, close) becomes bloated with checks:
+
+Java
+// Bad Practice: Procedural state checks inside every method
+public class MCADDocument {
+    private String state = "OPEN";
+
+    public void save() {
+        if (state.equals("OPEN")) {
+            System.out.println("Nothing to save yet.");
+        } else if (state.equals("NOT_SAVED")) {
+            System.out.println("Saving 3D geometry to disk...");
+            state = "SAVED";
+        } else if (state.equals("SAVED")) {
+            System.out.println("Document is already saved.");
+        }
+    }
+    // Repeat similar if/else blocks for edit(), close(), render(), export()...
+}
+The Problem: Adding new states (like ReadOnly, AutoSaving, or Corrupted) requires modifying every single method in MCADDocument, violating the Open/Closed Principle (OCP).
+
+The Solution: Encapsulate States as Classes
+The State Pattern extracts state-specific behavior into separate state classes that implement a common interface. The MCADDocument (Context) simply holds a reference to its current DocumentState object and delegates operations to it.
+
+State Pattern Topology
+[ Context: MCADDocument ] ---> [ State Interface: DocumentState ]
+                                         ^
+          +------------------------------+------------------------------+
+          |                              |                              |
+[ OpenState ]                    [ NotSavedState ]               [ SavedState ]
+1. Define the State Interface
+Each state implementation handles the same set of actions (edit, save, close).
+
+Java
+public interface DocumentState {
+    void edit(MCADDocument doc);
+    void save(MCADDocument doc);
+    void close(MCADDocument doc);
+}
+2. Implement Concrete States
+Each state class encapsulates the behavior specific to that state and controls transitions to other states.
+
+Java
+// 1. Initial Open State (Freshly loaded file, unmodified)
+public class OpenState implements DocumentState {
+    @Override
+    public void edit(MCADDocument doc) {
+        System.out.println("Modified 3D geometry mesh.");
+        doc.setState(new NotSavedState()); // Transition to NotSaved
+    }
+
+    @Override
+    public void save(MCADDocument doc) {
+        System.out.println("No changes detected. Nothing to save.");
+    }
+
+    @Override
+    public void close(MCADDocument doc) {
+        System.out.println("Closing clean document.");
+    }
+}
+
+// 2. Not Saved State (Unsaved edits exist in memory)
+public class NotSavedState implements DocumentState {
+    @Override
+    public void edit(MCADDocument doc) {
+        System.out.println("Additional 3D features added.");
+        // Remains in NotSavedState
+    }
+
+    @Override
+    public void save(MCADDocument doc) {
+        System.out.println("Writing updated CAD geometry and assembly references to disk...");
+        doc.setState(new SavedState()); // Transition to Saved
+    }
+
+    @Override
+    public void close(MCADDocument doc) {
+        System.out.println("WARNING: Unsaved changes exist! Prompting user to save before closing.");
+    }
+}
+
+// 3. Saved State (All edits persisted to disk)
+public class SavedState implements DocumentState {
+    @Override
+    public void edit(MCADDocument doc) {
+        System.out.println("New edit detected on saved model.");
+        doc.setState(new NotSavedState()); // Transition back to NotSaved
+    }
+
+    @Override
+    public void save(MCADDocument doc) {
+        System.out.println("Document is already up to date on disk.");
+    }
+
+    @Override
+    public void close(MCADDocument doc) {
+        System.out.println("Closing saved document safely.");
+    }
+}
+3. Implement the Context (MCADDocument)
+The document class delegates all action requests to whichever DocumentState object is currently active.
+
+Java
+public class MCADDocument {
+    private String fileName;
+    private DocumentState currentState;
+
+    public MCADDocument(String fileName) {
+        this.fileName = fileName;
+        this.currentState = new OpenState(); // Default initial state
+    }
+
+    public void setState(DocumentState state) {
+        this.currentState = state;
+    }
+
+    // Context methods delegate execution directly to the current state
+    public void edit() { currentState.edit(this); }
+    public void save() { currentState.save(this); }
+    public void close() { currentState.close(this); }
+
+    public String getFileName() { return fileName; }
+}
+4. The Execution (Client Code)
+Java
+public class StateDemo {
+    public static void main(String[] args) {
+        MCADDocument engineModel = new MCADDocument("V8_Engine_Block.step");
+
+        // State: Open
+        engineModel.save();  // "No changes detected. Nothing to save."
+
+        // Edit triggers transition: Open -> NotSaved
+        engineModel.edit();  // "Modified 3D geometry mesh."
+
+        // State: NotSaved
+        engineModel.close(); // "WARNING: Unsaved changes exist! Prompting user..."
+
+        // Save triggers transition: NotSaved -> Saved
+        engineModel.save();  // "Writing updated CAD geometry... to disk"
+
+        // State: Saved
+        engineModel.save();  // "Document is already up to date on disk."
+
+        // Edit triggers transition: Saved -> NotSaved
+        engineModel.edit();  // "New edit detected on saved model."
+    }
+}
+Key Architectural Benefits
+Single Responsibility Principle (SRP): The logic associated with a particular state is isolated inside its own class file.
+
+Open/Closed Principle (OCP): You can add new states (e.g., ReadOnlyState, AutoSavingState) without modifying existing state classes or the MCADDocument class.
+
+Elimination of Conditional Complexity: Replaces large, error-prone if-else or switch statements with polymorphism, making state transitions explicit and self-contained.
