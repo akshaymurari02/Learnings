@@ -1,0 +1,75 @@
+Here is a cleanly structured version of your notes, formatted for easy reading and quick reference.
+
+Strategy Pattern: Payment Service Example
+The Problem: Conditional Logic (Breaking OCP)
+When building a service using procedural if-else statements, every new requirement forces you to modify existing code. This violates the Open/Closed Principle (OCP), which dictates that classes should be open for extension but closed for modification.
+
+Java
+public class PaymentService {
+    private String type;
+
+    public PaymentService(String type) {
+        this.type = type;
+    }
+
+    public void makePayment(double amount) {
+        // Bad Practice: Tangled conditional logic
+        if (type.equals("CREDIT_CARD")) {
+            makeCreditCardPayment(amount);
+        } else if (type.equals("DEBIT_CARD")) {
+            makeDebitCardPayment(amount);
+        } else if (type.equals("UPI")) {
+            makeUpiPayment(amount);
+        }
+    }
+    
+    // ... private payment implementation methods
+}
+The Solution: Extensible Strategies
+To resolve this, extract the varying behavior into separate classes behind a common interface. This removes the if conditions entirely. The PaymentService now simply delegates the execution to the injected strategy, resulting in a clean, extensible service-oriented design.
+
+1. Define the Strategy Interface
+Java
+public interface PaymentStrategy {
+    void makePayment(double amount);
+}
+2. Implement Concrete Strategies
+Each payment method implements the interface, encapsulating its own specific logic.
+
+Java
+public class CreditCardStrategy implements PaymentStrategy {
+    @Override
+    public void makePayment(double amount) {
+        System.out.println("Processing credit card payment of $" + amount);
+    }
+}
+
+public class UpiStrategy implements PaymentStrategy {
+    @Override
+    public void makePayment(double amount) {
+        System.out.println("Processing UPI payment of $" + amount);
+    }
+}
+3. The Refactored Service
+The main service is no longer responsible for knowing how to process payments, only that a payment needs to be made.
+
+Java
+public class PaymentService {
+    private PaymentStrategy paymentStrategy;
+
+    // Inject the strategy
+    public PaymentService(PaymentStrategy paymentStrategy) {
+        this.paymentStrategy = paymentStrategy;
+    }
+
+    public void makePayment(double amount) {
+        // Execution is delegated. No if/else needed!
+        paymentStrategy.makePayment(amount);
+    }
+}
+Key Architectural Benefits
+OCP Compliant: Adding a new payment method (e.g., CryptoStrategy) only requires creating a new class. The PaymentService class remains entirely untouched.
+
+Separation of Concerns: Each algorithm is isolated, meaning a bug in the UPI logic won't affect the Credit Card logic.
+
+Runtime Flexibility: The application can dynamically swap the PaymentStrategy at runtime based on user selection without breaking the flow.
