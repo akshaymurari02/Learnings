@@ -1,0 +1,105 @@
+================================================================================
+                    CHAIN OF RESPONSIBILITY PATTERN
+================================================================================
+
+[ PROBLEM: RIGID REQUEST ROUTING ]
+Monolithic logging or request-handling logic using large if-else or switch 
+blocks forces a single class to handle both routing rules and processing logic. 
+Adding new severity levels or destinations violates the Single Responsibility 
+Principle (SRP) and Open/Closed Principle (OCP).
+
+[ SOLUTION ]
+Decouple the sender of a request from its receivers by linking handler 
+objects sequentially into a chain. Each handler evaluates whether to process 
+the request and whether to pass it to the next link in the chain.
+
+
+--------------------------------------------------------------------------------
+ 1. CHAIN TOPOLOGY
+--------------------------------------------------------------------------------
+
+[ Client ] ---> [ InfoLogger ] ---> [ DebugLogger ] ---> [ WarningLogger ] ---> [ ErrorLogger ]
+
+
+--------------------------------------------------------------------------------
+ 2. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+1. Abstract Base Handler:
+   
+   public abstract class AbstractLogger {
+       public static int INFO = 1;
+       public static int DEBUG = 2;
+       public static int WARNING = 3;
+       public static int ERROR = 4;
+
+       protected int level;
+       protected AbstractLogger nextLogger;
+
+       public AbstractLogger(int level) {
+           this.level = level;
+       }
+
+       public void setNextLogger(AbstractLogger nextLogger) {
+           this.nextLogger = nextLogger;
+       }
+
+       public void logMessage(int level, String message) {
+           if (this.level <= level) {
+               write(message);
+           }
+           if (nextLogger != null) {
+               nextLogger.logMessage(level, message);
+           }
+       }
+
+       protected abstract void write(String message);
+   }
+
+2. Concrete Handlers:
+
+   public class InfoLogger extends AbstractLogger {
+       public InfoLogger(int level) { super(level); }
+       @Override
+       protected void write(String message) {
+           System.out.println("[CONSOLE INFO]: " + message);
+       }
+   }
+
+   public class ErrorLogger extends AbstractLogger {
+       public ErrorLogger(int level) { super(level); }
+       @Override
+       protected void write(String message) {
+           System.out.println("[ALERT ERROR]: Sending urgent SMS/Email: " + message);
+       }
+   }
+
+3. Assembling and Executing the Chain:
+
+   AbstractLogger errorLogger = new ErrorLogger(AbstractLogger.ERROR);
+   AbstractLogger infoLogger  = new InfoLogger(AbstractLogger.INFO);
+
+   // Build chain: Info -> Error
+   infoLogger.setNextLogger(errorLogger);
+
+   // Trigger: Passes through the chain
+   infoLogger.logMessage(AbstractLogger.ERROR, "Database connection lost!");
+
+
+--------------------------------------------------------------------------------
+ 3. KEY ARCHITECTURAL TAKEAWAYS
+--------------------------------------------------------------------------------
+
+- Dynamic Reconfiguration: Handlers can be added, reordered, or removed at 
+  runtime without modifying existing handler classes.
+
+- Processing Variances:
+  * Pass-Through (Fan-Out)   : Every applicable handler processes the request 
+                               (e.g., Logging pipeline).
+  * Stop-on-Handled (Exclusive): Processing terminates as soon as one handler 
+                               claims the request (e.g., Middleware / UI events).
+
+
+================================================================================
+                                END OF SECTION
+================================================================================
