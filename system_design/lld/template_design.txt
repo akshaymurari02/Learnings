@@ -1,0 +1,150 @@
+Template Method Pattern: Beverage Preparation Example
+The Problem: Duplicated Algorithm Workflows
+Imagine you are building an automated barista application that prepares different hot beverages, such as Coffee and Tea.
+
+Both preparation workflows follow almost the exact same sequence of steps:
+
+Boil water
+
+Brew the main ingredient (coffee grounds vs. tea bag)
+
+Pour into a cup
+
+Add condiments (sugar/milk vs. lemon)
+
+Java
+// Bad Practice: Duplicating the algorithm structure across classes
+public class Coffee {
+    public void prepareCoffee() {
+        boilWater();       // Duplicated
+        brewCoffeeGrinds();
+        pourInCup();       // Duplicated
+        addSugarAndMilk();
+    }
+}
+
+public class Tea {
+    public void prepareTea() {
+        boilWater();       // Duplicated
+        steepTeaBag();
+        pourInCup();       // Duplicated
+        addLemon();
+    }
+}
+The Problem: The overarching algorithm structure is duplicated. If the preparation process changes globally (e.g., adding a "Sanitize Cup" step before pouring), you must manually update every beverage class.
+
+The Solution: Define the Algorithm Skeleton in a Base Class
+The Template Method Pattern defines the invariant steps of an algorithm in a base class's final method, delegating specific variant steps (brew, addCondiments) to abstract methods that subclasses implement.
+
+Template Method Topology
+┌───────────────────────────────────────────────────┐
+│ Abstract Superclass: CaffeineBeverage            │
+├───────────────────────────────────────────────────┤
+│ + prepareRecipe() [final template method]        │
+│   ├─ boilWater() [concrete]                       │
+│   ├─ brew() [abstract]                            │
+│   ├─ pourInCup() [concrete]                       │
+│   └─ addCondiments() [abstract]                   │
+└─────────────────────────┬─────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌──────────────────┐            ┌──────────────────┐
+│  Concrete Class: │            │  Concrete Class: │
+│      Coffee      │            │       Tea        │
+└──────────────────┘            └──────────────────┘
+1. Abstract Base Class (The Template)
+Mark the template method final so subclasses cannot tamper with or reorder the overall algorithm's steps.
+
+Java
+public abstract class CaffeineBeverage {
+
+    // 1. THE TEMPLATE METHOD
+    // Declared final so subclasses cannot override the execution order
+    public final void prepareRecipe() {
+        boilWater();
+        brew();
+        pourInCup();
+        if (customerWantsCondiments()) { // Optional Hook
+            addCondiments();
+        }
+    }
+
+    // Shared invariant steps implemented directly in the base class
+    private void boilWater() {
+        System.out.println("Boiling water...");
+    }
+
+    private void pourInCup() {
+        System.out.println("Pouring into cup...");
+    }
+
+    // Variant steps deferred to subclasses
+    protected abstract void brew();
+    protected abstract void addCondiments();
+
+    // Hook Method: Provides default behavior that subclasses CAN optionally override
+    protected boolean customerWantsCondiments() {
+        return true; 
+    }
+}
+2. Implement Concrete Subclasses
+Subclasses focus solely on their specific steps without worrying about the overall sequence.
+
+Java
+// Concrete Implementation 1: Coffee
+public class Coffee extends CaffeineBeverage {
+    @Override
+    protected void brew() {
+        System.out.println("Dripping coffee through filter...");
+    }
+
+    @Override
+    protected void addCondiments() {
+        System.out.println("Adding sugar and milk...");
+    }
+}
+
+// Concrete Implementation 2: Tea (with a Hook override)
+public class Tea extends CaffeineBeverage {
+    private boolean wantsLemon;
+
+    public Tea(boolean wantsLemon) {
+        this.wantsLemon = wantsLemon;
+    }
+
+    @Override
+    protected void brew() {
+        System.out.println("Steeping the tea bag...");
+    }
+
+    @Override
+    protected void addCondiments() {
+        System.out.println("Adding lemon slice...");
+    }
+
+    // Overriding the Hook method to dynamically control step execution
+    @Override
+    protected boolean customerWantsCondiments() {
+        return this.wantsLemon;
+    }
+}
+3. The Execution (Client Code)
+Java
+public class BaristaDemo {
+    public static void main(String[] args) {
+        System.out.println("--- Preparing Coffee ---");
+        CaffeineBeverage coffee = new Coffee();
+        coffee.prepareRecipe();
+
+        System.out.println("\n--- Preparing Plain Tea ---");
+        CaffeineBeverage plainTea = new Tea(false); // Customer declined lemon
+        plainTea.prepareRecipe();
+    }
+}
+Key Architectural Concepts
+1. The Hollywood Principle ("Don't call us, we'll call you")
+In standard inheritance or procedural code, subclasses often call methods on parent classes. The Template Method flips this relationship: the high-level abstract superclass controls the workflow and calls the low-level subclass operations only when needed.
+
+2. What is a "Hook"?
+A Hook is a method declared in the abstract class with a default implementation (often empty or returning a boolean). Subclasses can override hooks to execute optional steps or control logic without altering the algorithm structure.
