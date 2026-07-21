@@ -1,0 +1,190 @@
+================================================================================
+                        VISITOR DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: OPERATING ON COMPLEX OBJECT STRUCTURES ]
+When you have a complex tree or composite structure (like a UI component hierarchy, 
+an Abstract Syntax Tree, or a document graph), adding new operations (e.g., 
+"collect visited nodes", "export to JSON", "calculate total size") directly into 
+the element classes pollutes domain objects with unrelated logic.
+
+[ SOLUTION ]
+Separate the algorithm/operation from the object structure it operates on. 
+Define an `accept(Visitor v)` method on the elements, which dispatches execution 
+to a separate `Visitor` object (`visitor.visit(this)`).
+
+
+--------------------------------------------------------------------------------
+ 1. SOLID PRINCIPLES: WHAT IT SOLVES VS. WHAT IT BREAKS
+--------------------------------------------------------------------------------
+
+[ HOW IT SOLVES SOLID PRINCIPLES ]
+
+1. Single Responsibility Principle (SRP) - UPHELD
+   - Problem Solved : Domain objects (e.g., UI elements, AST nodes) often get 
+                      cluttered with XML export, JSON serializing, rendering, 
+                      or analytics tracking logic.
+   - Visitor Solution: Strips all operational algorithms out of domain classes. 
+                      Domain elements focus solely on data/structure, while 
+                      each Visitor class handles one specific operation.
+
+2. Open/Closed Principle (OCP for Operations) - UPHELD
+   - Problem Solved : Adding a new feature (e.g., "ExportToYAML") usually 
+                      requires editing every element class.
+   - Visitor Solution: You can add unlimited new operations simply by creating 
+                      a new `ElementVisitor` implementation without modifying 
+                      a single line of code in existing element classes.
+
+
+[ WHICH SOLID PRINCIPLES IT BREAKS / STRAINS ]
+
+1. Open/Closed Principle (OCP for Element Hierarchy) - BROKEN
+   - The Flaw       : If you add a NEW Concrete Element class (e.g., `RadioButton`), 
+                      you MUST update the `ElementVisitor` interface AND add 
+                      a `visit(RadioButton node)` method to EVERY existing 
+                      Visitor implementation in your codebase.
+   - Rule of Thumb  : Use Visitor when Element classes are STABLE, but 
+                      Operations change FREQUENTLY.
+
+2. Dependency Inversion Principle (DIP) - STRAINED
+   - The Flaw       : High-level abstractions should not depend on low-level 
+                      details. However, the `Visitor` interface must explicitly 
+                      reference concrete types (`visit(LeafComponent leaf)`, 
+                      `visit(ContainerNode container)`). This tightly couples 
+                      the Visitor interface to concrete element classes.
+
+
+--------------------------------------------------------------------------------
+ 2. DOUBLE DISPATCH CONCEPT
+--------------------------------------------------------------------------------
+
+The core mechanism of the Visitor pattern is Double Dispatch:
+
+1. The client calls: `element.accept(visitor)`
+2. Inside `accept`, the element calls back: `visitor.visit(this)`
+
+This allows Java to dynamically determine both:
+- Which Element's code runs (`element` class type).
+- Which Visitor's algorithm executes (`visitor` implementation).
+
+
+--------------------------------------------------------------------------------
+ 3. REAL-WORLD USE CASE: OBJECT GRAPH TRAVERSAL & EXPLORATION
+--------------------------------------------------------------------------------
+
+Traversing a composite structure to keep track of visited child objects 
+(e.g., auditing UI trees, building execution history, or collecting telemetry) 
+is a classic Visitor application.
+
+[ TOPOLOGY ]
+
+[ Client ] ---> calls accept(visitor)
+                    |
+                    v
+             [ Parent Node ] ---> calls accept on child1, child2
+                    |                 |
+                    |                 +---> [ Child 1 ] ---> visitor.visit(this)
+                    |                 +---> [ Child 2 ] ---> visitor.visit(this)
+                    v
+             visitor.visit(this)  <--- (Post-Order / Bottom-Up Collection)
+
+
+--------------------------------------------------------------------------------
+ 4. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+1. Visitor Interface (Tightly coupled to concrete element types):
+
+   public interface ElementVisitor {
+       void visit(ContainerNode container);
+       void visit(LeafComponent leaf);
+   }
+
+2. Element Interface:
+
+   public interface ComponentElement {
+       void accept(ElementVisitor visitor);
+   }
+
+3. Concrete Elements (Composite Tree Structure):
+
+   public class LeafComponent implements ComponentElement {
+       private String name;
+
+       public LeafComponent(String name) { this.name = name; }
+       public String getName() { return name; }
+
+       @Override
+       public void accept(ElementVisitor visitor) {
+           visitor.visit(this); // Hand off self to visitor
+       }
+   }
+
+   public class ContainerNode implements ComponentElement {
+       private String name;
+       private List<ComponentElement> children = new ArrayList<>();
+
+       public ContainerNode(String name) { this.name = name; }
+       public void addChild(ComponentElement child) { children.add(child); }
+       public String getName() { return name; }
+
+       @Override
+       public void accept(ElementVisitor visitor) {
+           // Traversal pattern: Visit children first, then container (Post-order)
+           for (ComponentElement child : children) {
+               child.accept(visitor);
+           }
+           visitor.visit(this); 
+       }
+   }
+
+4. Concrete Visitor (Object Tracker / Graph Explorer):
+
+   public class ObjectTrackerVisitor implements ElementVisitor {
+       private List<String> visitedHistory = new ArrayList<>();
+
+       @Override
+       public void visit(LeafComponent leaf) {
+           visitedHistory.add("Visited Leaf: " + leaf.getName());
+       }
+
+       @Override
+       public void visit(ContainerNode container) {
+           visitedHistory.add("Visited Container: " + container.getName());
+       }
+
+       public List<String> getVisitedHistory() {
+           return visitedHistory;
+       }
+   }
+
+5. Execution:
+
+   ContainerNode root = new ContainerNode("Root");
+   root.addChild(new LeafComponent("Button1"));
+   root.addChild(new LeafComponent("TextField2"));
+
+   ObjectTrackerVisitor collector = new ObjectTrackerVisitor();
+   root.accept(collector);
+
+   // Returns history without modifying element domain code
+   System.out.println(collector.getVisitedHistory());
+
+
+--------------------------------------------------------------------------------
+ 5. DECISION MATRIX: WHEN TO USE VISITOR
+--------------------------------------------------------------------------------
+
++-----------------------------------------+-----------------------------------+
+| System Characteristic                   | Recommended Pattern               |
++-----------------------------------------+-----------------------------------+
+| Fixed operations, frequently adding     | Standard OOP Class Inheritance    |
+| new Element types.                      | (Polymorphism).                   |
+|                                         |                                   |
+| Fixed Element types, frequently adding  | Visitor Pattern                   |
+| new operations / behaviors.             | (Double Dispatch).                |
++-----------------------------------------+-----------------------------------+
+
+================================================================================
+                                END OF SECTION
+================================================================================
