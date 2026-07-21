@@ -1,0 +1,181 @@
+================================================================================
+                        MEMENTO DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: EXPOSING & CORRUPTING INTERNAL STATE ]
+When building an Undo/Redo feature for a Text Editor, saving internal state 
+snapshots directly to a public history array exposes private data structures. 
+Allowing external objects to inspect or modify past text states violates 
+Encapsulation and risks history corruption.
+
+[ SOLUTION ]
+Externalize state snapshots into an IMMUTABLE `Memento` object. 
+- The `Originator` (TextEditor) creates and restores mementos.
+- The `Memento` (TextMemento) holds a read-only snapshot of state.
+- The `Caretaker` (HistoryManager) stores mementos without modifying or reading them.
+
+
+--------------------------------------------------------------------------------
+ 1. PARTICIPANTS & ROLES
+--------------------------------------------------------------------------------
+
++-------------------+----------------------------------------------------------+
+| Role              | Responsibility                                           |
++-------------------+----------------------------------------------------------+
+| 1. Originator     | The main object (TextEditor) whose state needs saving.   |
+|    (TextEditor)   | Creates mementos and restores state from mementos.       |
+|                   |                                                          |
+| 2. Memento        | An IMMUTABLE value object (TextMemento).                 |
+|    (TextMemento)  | Stores state snapshot; lacks setters so state cannot     |
+|                   | be altered once saved.                                   |
+|                   |                                                          |
+| 3. Caretaker      | Manages history stack (HistoryManager).                  |
+|    (History)      | Holds Mementos, pushes/pops them, but NEVER inspects    |
+|                   | or alters their internal contents.                       |
++-------------------+----------------------------------------------------------+
+
+
+--------------------------------------------------------------------------------
+ 2. TOPOLOGY & DATA FLOW
+--------------------------------------------------------------------------------
+
+[ Client ] ---> Type text in [ TextEditor ]
+                     |
+                     | 1. save()
+                     v
+             Creates [ TextMemento ] (Immutable Snapshot)
+                     |
+                     | 2. push(memento)
+                     v
+             Stored in [ HistoryManager Stack ]
+                     |
+                     | 3. undo() -> pop() -> restore(memento)
+                     v
+             [ TextEditor ] reverts to past state
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+1. The Memento (Immutable State Snapshot):
+
+   public final class TextMemento {
+       private final String content; // Immutable snapshot
+
+       public TextMemento(String content) {
+           this.content = content;
+       }
+
+       // Only getter provided — NO setters exist!
+       public String getContent() {
+           return content;
+       }
+   }
+
+2. The Originator (Text Editor):
+
+   public class TextEditor {
+       private StringBuilder content = new StringBuilder();
+
+       public void write(String text) {
+           content.append(text);
+       }
+
+       public String getContent() {
+           return content.toString();
+       }
+
+       // Saves current state into an immutable Memento
+       public TextMemento save() {
+           return new TextMemento(content.toString());
+       }
+
+       // Restores state from a given Memento
+       public void restore(TextMemento memento) {
+           if (memento != null) {
+               this.content = new StringBuilder(memento.getContent());
+           }
+       }
+   }
+
+3. The Caretaker (History Stack Manager):
+
+   import java.util.ArrayDeque;
+   import java.util.Deque;
+
+   public class HistoryManager {
+       private final Deque<TextMemento> history = new ArrayDeque<>();
+
+       public void push(TextMemento memento) {
+           history.push(memento);
+       }
+
+       public TextMemento pop() {
+           if (!history.isEmpty()) {
+               return history.pop();
+           }
+           return null;
+       }
+   }
+
+4. Execution:
+
+   TextEditor editor = new TextEditor();
+   HistoryManager history = new HistoryManager();
+
+   // Step 1: Type word and save snapshot
+   editor.write("Hello ");
+   history.push(editor.save()); // Saved: "Hello "
+
+   // Step 2: Type more and save snapshot
+   editor.write("World!");
+   history.push(editor.save()); // Saved: "Hello World!"
+
+   // Step 3: Type unintended text
+   editor.write(" Extra typo text...");
+   System.out.println("Current Text: " + editor.getContent()); 
+   // Output: Hello World! Extra typo text...
+
+   // Step 4: Perform UNDO (Revert state)
+   history.pop(); // Discard latest typo state
+   editor.restore(history.pop()); // Restore previous state
+
+   System.out.println("After Undo: " + editor.getContent()); 
+   // Output: Hello 
+
+
+--------------------------------------------------------------------------------
+ 4. SOLID PRINCIPLES & ARCHITECTURAL BENEFITS
+--------------------------------------------------------------------------------
+
+1. Encapsulation Protection:
+   Internal state details of `TextEditor` remain hidden inside the class. 
+   The `HistoryManager` holds the `TextMemento` object as an opaque package.
+
+2. Single Responsibility Principle (SRP):
+   - `TextEditor` handles editing & business logic.
+   - `HistoryManager` handles saving history and stack ordering.
+   - `TextMemento` acts strictly as an immutable data snapshot.
+
+3. Strict Immutability:
+   Because `TextMemento` fields are `final` with no setters, past saved states 
+   can never be tampered with or corrupted accidentally by client operations.
+
+
+--------------------------------------------------------------------------------
+ 5. PATTERN COMPARISON
+--------------------------------------------------------------------------------
+
++-------------------+-----------------------------------+-----------------------------------+
+| Feature           | Memento Pattern                   | Command Pattern (with Undo)       |
++-------------------+-----------------------------------+-----------------------------------+
+| Primary Intent    | Capture and restore state snapshot| Encapsulate request/operation     |
+|                   | directly.                         | and reverse it execution-wise.    |
+| Memory Footprint  | High (stores full state copy).    | Low (stores delta / inverse spec).|
+| Use Case          | Rich text, drawing canvas state.  | Database transactions, hotkeys.   |
++-------------------+-----------------------------------+-----------------------------------+
+
+================================================================================
+                                END OF SECTION
+================================================================================
