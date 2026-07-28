@@ -1,0 +1,176 @@
+================================================================================
+                        DECORATOR DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: SUBCLASS EXPLOSION & RIGID BEHAVIOR ]
+Inheritance adds behavior at compile-time. If you want to combine multiple optional 
+features (e.g., Coffee with Milk, Extra Caffeine, Heart-Shape Latte Art, Syrup), 
+using subclassing leads to a combinatorial explosion of classes 
+(`MilkAndExtraCaffeineCoffee`, `MilkAndLatteArtCoffee`, etc.).
+
+Furthermore, once an object is created via standard inheritance, its behavior 
+cannot be altered or enhanced at runtime.
+
+[ SOLUTION ]
+Use Composition over Inheritance. Wrap the target object inside a `Decorator` 
+object that implements the EXACT same interface as the target. The Decorator 
+delegates the core call to the wrapped object and adds its own extra behavior 
+before or after the call.
+
+
+--------------------------------------------------------------------------------
+ 1. DECORATOR TOPOLOGY (DYNAMIC ONION LAYERS)
+--------------------------------------------------------------------------------
+
+Client Call: `coffee.getDescription()` and `coffee.getCost()`
+
++-----------------------------------------------------------------------------+
+| HeartShapeDecorator (Outer Layer)                                           |
+| Adds: " + Heart Art", Cost: + $0.50                                         |
+|                                                                             |
+|   +---------------------------------------------------------------------+   |
+|   | ExtraCaffeineDecorator (Middle Layer)                               |   |
+|   | Adds: " + Extra Shot", Cost: + $1.00                                |   |
+|   |                                                                     |   |
+|   |   +-------------------------------------------------------------+   |   |
+|   |   | SimpleCoffee (Core Object)                                  |   |   |
+|   |   | Returns: "Espresso", Cost: $3.00                            |   |   |
+|   |   +-------------------------------------------------------------+   |   |
+|   +---------------------------------------------------------------------+   |
++-----------------------------------------------------------------------------+
+
+Final Output : "Espresso + Extra Shot + Heart Art"
+Total Cost   : $4.50
+
+
+--------------------------------------------------------------------------------
+ 2. SOLID PRINCIPLES: HOW DECORATOR SOLVES OCP & SRP
+--------------------------------------------------------------------------------
+
+1. Open/Closed Principle (OCP) - UPHELD
+   - New behaviors/decorators (e.g., `CaramelSyrupDecorator`) can be added without 
+     modifying existing `Coffee` implementations or other decorators.
+   - Core objects remain closed for modification, open for extension via wrapping.
+
+2. Single Responsibility Principle (SRP) - UPHELD
+   - Instead of one bloated `Coffee` class handling pricing, caffeine calculation, 
+     and custom art rendering, each Decorator class handles exactly ONE feature.
+
+3. Interface Consistency
+   - Because all decorators implement `Coffee`, client code never knows (or cares) 
+     whether it holds a raw `SimpleCoffee` or a heavily wrapped 5-layer Coffee.
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+// 1. Component Interface (The uniform contract)
+public interface Coffee {
+    String getDescription();
+    double getCost();
+}
+
+// 2. Concrete Component (The core base object)
+public class SimpleCoffee implements Coffee {
+    @Override
+    public String getDescription() {
+        return "Espresso";
+    }
+
+    @Override
+    public double getCost() {
+        return 3.00;
+    }
+}
+
+// 3. Abstract Decorator (Implements Coffee AND wraps a Coffee instance)
+public abstract class CoffeeDecorator implements Coffee {
+    protected final Coffee decoratedCoffee;
+
+    public CoffeeDecorator(Coffee coffee) {
+        this.decoratedCoffee = coffee;
+    }
+
+    @Override
+    public String getDescription() {
+        return decoratedCoffee.getDescription(); // Default delegation
+    }
+
+    @Override
+    public double getCost() {
+        return decoratedCoffee.getCost(); // Default delegation
+    }
+}
+
+// 4. Concrete Decorator 1: Extra Caffeine
+public class ExtraCaffeineDecorator extends CoffeeDecorator {
+    public ExtraCaffeineDecorator(Coffee coffee) {
+        super(coffee);
+    }
+
+    @Override
+    public String getDescription() {
+        return super.getDescription() + " + Extra Shot (100mg Caffeine)";
+    }
+
+    @Override
+    public double getCost() {
+        return super.getCost() + 1.00; // Adds $1.00
+    }
+}
+
+// 5. Concrete Decorator 2: Heart Shape Latte Art
+public class HeartShapeDecorator extends CoffeeDecorator {
+    public HeartShapeDecorator(Coffee coffee) {
+        super(coffee);
+    }
+
+    @Override
+    public String getDescription() {
+        return super.getDescription() + " + Heart-Shape Foam Art";
+    }
+
+    @Override
+    public double getCost() {
+        return super.getCost() + 0.50; // Adds $0.50
+    }
+}
+
+// 6. Execution (Runtime Assembly)
+public class CoffeeShopDemo {
+    public static void main(String[] args) {
+        // Step 1: Start with plain coffee
+        Coffee myCoffee = new SimpleCoffee();
+        System.out.println(myCoffee.getDescription() + " -> $" + myCoffee.getCost());
+
+        // Step 2: Wrap with Extra Caffeine
+        myCoffee = new ExtraCaffeineDecorator(myCoffee);
+
+        // Step 3: Wrap with Heart-Shape Art on top
+        myCoffee = new HeartShapeDecorator(myCoffee);
+
+        // Client interacts with same Coffee interface!
+        System.out.println("\nFinal Customized Order:");
+        System.out.println("Description : " + myCoffee.getDescription());
+        System.out.println("Total Cost  : $" + myCoffee.getCost());
+    }
+}
+
+
+--------------------------------------------------------------------------------
+ 4. REAL-WORLD JDK EXAMPLES OF DECORATOR
+--------------------------------------------------------------------------------
+
+Java's standard I/O streams are the classic JDK implementation of Decorator:
+
+  InputStream in = new BufferedInputStream(new FileInputStream("data.txt"));
+
+- `FileInputStream`      : Concrete Component (reads raw bytes from file).
+- `BufferedInputStream`  : Concrete Decorator (adds buffering behavior).
+- `GZIPInputStream`      : Concrete Decorator (adds decompression on top).
+
+
+================================================================================
+                                END OF SECTION
+================================================================================
