@@ -1,0 +1,165 @@
+================================================================================
+                        ADAPTER DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: INCOMPATIBLE INTERFACES & PROCEDURAL TYPE CHECKS ]
+When integrating third-party libraries, legacy services, or external APIs 
+(e.g., an external Weather API returning Fahrenheit, or a legacy system sending XML), 
+client code often needs data in a different format (e.g., Celsius or JSON).
+
+Without an Adapter, code gets littered with conditional checks:
+  if (dataType == XML) { convertXmlToJson(); } 
+  else if (unit == FAHRENHEIT) { convertFahrenheitToCelsius(); }
+
+This procedural approach violates the Single Responsibility Principle (SRP) and 
+Open/Closed Principle (OCP), coupling core business logic to external types.
+
+[ SOLUTION ]
+Create an `Adapter` class that acts as a wrapper. It implements the target 
+interface expected by your system and translates requests under the hood into 
+calls to the incompatible third-party or legacy class (`Adaptee`). 
+
+All data flows uniformly through your system using a single, standardized 
+target interface—completely eliminating `if-else` type-checking blocks.
+
+
+--------------------------------------------------------------------------------
+ 1. SOLID PRINCIPLES: HOW ADAPTER SOLVES OCP & SRP
+--------------------------------------------------------------------------------
+
+1. Single Responsibility Principle (SRP) - UPHELD
+   - Problem Solved : Business logic (e.g., weather reporting, analytics) gets 
+                      cluttered with low-level data transformation code.
+   - Adapter Solution: Isolates conversion algorithms (Fahrenheit->Celsius or 
+                      XML->JSON) entirely within the Adapter class. Core business 
+                      code remains clean and focused on domain logic.
+
+2. Open/Closed Principle (OCP) - UPHELD
+   - Problem Solved : Adding a new third-party provider (e.g., Kelvin API or 
+                      YAML data feed) requires modifying existing client code 
+                      with new `if-else` or `switch` cases.
+   - Adapter Solution: You can introduce new Adapters for new external sources 
+                      without modifying existing client code or target interfaces.
+
+3. Elimination of Procedural Conditional Logic
+   - Replaces `if (source instanceof FahrenheitLib) { ... }` branching with 
+     Polymorphism. The client strictly interacts with `WeatherService`, and 
+     dependency injection supplies the appropriate Adapter.
+
+
+--------------------------------------------------------------------------------
+ 2. ADAPTER TOPOLOGY & DATA FLOW
+--------------------------------------------------------------------------------
+
+[ Client Code ] 
+       |
+       | Strictly expects Target Interface (Celsius)
+       v
++------------------------+
+| <<interface>>          |
+| WeatherService         | <--- Standard Target Interface
+| +getTempCelsius()      |
++------------------------+
+           ^
+           | implements
++------------------------------------+          +-------------------------------+
+| FahrenheitToCelsiusAdapter         |          | Third-Party / External Lib    |
+| ---------------------------------- |          | (Adaptee)                     |
+| - fahrenheitApi: FahrenheitApi     | -------> | ----------------------------- |
+| +getTempCelsius()                  |  wraps   | +getTemperatureFahrenheit()   |
++------------------------------------+          +-------------------------------+
+  (Translates F to C internally)                 (Incompatible Interface)
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+1. Target Interface (What your application strictly expects):
+
+   public interface WeatherService {
+       double getTemperatureInCelsius(String city);
+   }
+
+2. Adaptee (Third-party library / External API returning Fahrenheit):
+
+   public class ThirdPartyFahrenheitApi {
+       public double fetchTempFahrenheit(String cityName) {
+           // Simulating third-party external API call returning 98.6°F
+           return 98.6;
+       }
+   }
+
+3. The Adapter (Translates Fahrenheit to Celsius seamlessly):
+
+   public class FahrenheitToCelsiusAdapter implements WeatherService {
+       private final ThirdPartyFahrenheitApi fahrenheitApi;
+
+       public FahrenheitToCelsiusAdapter(ThirdPartyFahrenheitApi api) {
+           this.fahrenheitApi = api;
+       }
+
+       @Override
+       public double getTemperatureInCelsius(String city) {
+           // 1. Fetch raw value from third-party API
+           double tempFahrenheit = fahrenheitApi.fetchTempFahrenheit(city);
+           
+           // 2. Perform internal conversion logic (F to C)
+           double tempCelsius = (tempFahrenheit - 32) * 5 / 9;
+           
+           return tempCelsius;
+       }
+   }
+
+4. Execution (Client code handles standardized type without if-else checks):
+
+   public class WeatherAppDemo {
+       public static void main(String[] args) {
+           // Third-party instance
+           ThirdPartyFahrenheitApi externalApi = new ThirdPartyFahrenheitApi();
+
+           // Adapt the external API to our application's standard interface
+           WeatherService weatherService = new FahrenheitToCelsiusAdapter(externalApi);
+
+           // Client code relies purely on Celsius interface — NO IF-ELSE CHECKS
+           double tempInCelsius = weatherService.getTemperatureInCelsius("Bengaluru");
+           
+           System.out.println("Standardized Temperature: " + tempInCelsius + " °C");
+           // Output: Standardized Temperature: 37.0 °C
+       }
+   }
+
+
+--------------------------------------------------------------------------------
+ 4. SECOND USE CASE: DATA FORMAT ADAPTER (XML -> JSON)
+--------------------------------------------------------------------------------
+
+Similarly, when dealing with legacy data streams:
+
+1. Target Interface : `JsonAnalyticsEngine` expects JSON data.
+2. Adaptee          : `LegacyXmlDataProvider` produces XML strings.
+3. Adapter          : `XmlToJsonAdapter` implements `JsonAnalyticsEngine`, 
+                      parses incoming XML, converts it to JSON, and feeds it 
+                      to the engine.
+
+Result: The core pipeline operates strictly on JSON, keeping data structures 
+uniform throughout the application flow.
+
+
+--------------------------------------------------------------------------------
+ 5. PATTERN COMPARISON
+--------------------------------------------------------------------------------
+
++-------------------+-----------------------------------+-----------------------------------+
+| Feature           | Adapter Pattern                   | Decorator Pattern                 |
++-------------------+-----------------------------------+-----------------------------------+
+| Primary Intent    | Convert an incompatible interface | Enhance / add behaviors to an     |
+|                   | into a compatible target interface.| existing interface without       |
+|                   |                                   | changing its contract.            |
+| Interface Change  | YES - Changes interface to match.  | NO - Preserves original interface.|
+| Core Focus        | Interface compatibility & reuse.  | Dynamic responsibility addition.  |
++-------------------+-----------------------------------+-----------------------------------+
+
+================================================================================
+                                END OF SECTION
+================================================================================
