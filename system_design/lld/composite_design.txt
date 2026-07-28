@@ -1,0 +1,207 @@
+================================================================================
+                        COMPOSITE DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: TREATING LEAVES AND CONTAINERS DIFFERENTLY ]
+When building tree structures—such as a file system with Files and Directories, 
+or a UI layout with Buttons and Panels—clients often need to perform the same 
+operations (e.g., `getSize()`, `display()`, `delete()`) across both individual 
+items (Leaves) and groups of items (Containers).
+
+Without the Composite pattern, client code is forced to perform manual type checks:
+  for (Object node : nodeArrayList) {
+      if (node instanceof File) {
+          totalSize += ((File) node).getSize();
+      } else if (node instanceof Directory) {
+          totalSize += ((Directory) node).calculateDirectorySize(); // Procedural recursion
+      }
+  }
+
+This leads to fragile, tightly coupled code full of conditional logic, breaking the 
+Open/Closed Principle every time a new node type (e.g., `Symlink` or `Shortcut`) is added.
+
+[ SOLUTION ]
+Treat individual objects (Leaves) and compositions of objects (Composites) 
+UNIFORMLY by having both implement the same core interface (`FileSystemNode`). 
+
+A Composite node (`Directory`) holds a collection of `FileSystemNode` references. 
+When a method like `getSize()` is called on a Directory, it recursively delegates 
+the call down to all of its children—whether they are single Files or sub-Directories—
+without the client ever needing to check their types.
+
+
+--------------------------------------------------------------------------------
+ 1. SOLID PRINCIPLES: HOW COMPOSITE SOLVES OCP & SRP
+--------------------------------------------------------------------------------
+
+1. Open/Closed Principle (OCP) - UPHELD
+   - Problem Solved : Introducing a new node type (e.g., `ZipArchiveNode` or 
+                      `SymlinkNode`) previously required updating client loops 
+                      with new `if-else` branches.
+   - Composite Solution: New node types simply implement `FileSystemNode`. The 
+                      client treats them identically without modifying any code.
+
+2. Single Responsibility Principle (SRP) - UPHELD
+   - Problem Solved : Client code does not need to manage tree traversal, 
+                      nested collection iteration, or size calculation logic.
+   - Composite Solution: `File` handles leaf-level operations; `Directory` handles 
+                      child aggregation and recursive delegation; `Client` 
+                      simply triggers the operation on the root node.
+
+3. Polymorphic Uniformity
+   - Replaces procedural `if (node instanceof Directory)` branching with 
+     polymorphic dynamic dispatch. The exact same call (`node.getSize()`) works 
+     seamlessly for a 5KB File or a 50GB Directory.
+
+
+--------------------------------------------------------------------------------
+ 2. COMPOSITE TOPOLOGY & DATA FLOW
+--------------------------------------------------------------------------------
+
+[ Client Code ] 
+       |
+       | Operates uniformly on target interface
+       v
++-----------------------------+
+| <<interface>>               |
+| FileSystemNode              | <--- Common Target Interface
+| --------------------------- |
+| +getName(): String          |
+| +getSize(): long            |
+| +display(indent: String)    |
++-----------------------------+
+           ^
+           |
+     +-----+---------------------------------------+
+     |                                             |
+     | implements                                  | implements
++-----------------------+             +-----------------------------------+
+| File (Leaf)           |             | Directory (Composite)             |
+| --------------------- |             | --------------------------------- |
+| - name: String        |             | - name: String                    |
+| - size: long          |             | - children: List<FileSystemNode>  |
+| --------------------- |             | --------------------------------- |
+| +getSize(): long      |             | +add(node: FileSystemNode)        |
+|                       |             | +getSize(): long  (Recurses)      |
++-----------------------+             +-----------------------------------+
+                                                      |
+                                                      | contains 1..*
+                                                      v
+                                              [ FileSystemNode ]
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+1. Component Interface (Uniform abstraction for Leaves and Composites):
+
+   public interface FileSystemNode {
+       String getName();
+       long getSize();
+       void display(String indent);
+   }
+
+2. Leaf Node (Individual file with no children):
+
+   public class File implements FileSystemNode {
+       private final String name;
+       private final long sizeInBytes;
+
+       public File(String name, long sizeInBytes) {
+           this.name = name;
+           this.sizeInBytes = sizeInBytes;
+       }
+
+       @Override
+       public String getName() {
+           return name;
+       }
+
+       @Override
+       public long getSize() {
+           return sizeInBytes;
+       }
+
+       @Override
+       public void display(String indent) {
+           System.out.println(indent + "- File: " + name + " (" + sizeInBytes + " bytes)");
+       }
+   }
+
+3. Composite Node (Container holding both Files and other Directories):
+
+   import java.util.ArrayList;
+   import java.util.List;
+
+   public class Directory implements FileSystemNode {
+       private final String name;
+       private final List<FileSystemNode> children = new ArrayList<>();
+
+       public Directory(String name) {
+           this.name = name;
+       }
+
+       public void add(FileSystemNode node) {
+           children.add(node);
+       }
+
+       public void remove(FileSystemNode node) {
+           children.remove(node);
+       }
+
+       @Override
+       public String getName() {
+           return name;
+       }
+
+       // Recursive Calculation: Sums up sizes of all leaf & composite children
+       @Override
+       public long getSize() {
+           long totalSize = 0;
+           for (FileSystemNode child : children) {
+               totalSize += child.getSize(); // Polymorphic recursion
+           }
+           return totalSize;
+       }
+
+       @Override
+       public void display(String indent) {
+           System.out.println(indent + "+ Directory: " + name);
+           for (FileSystemNode child : children) {
+               child.display(indent + "  "); // Delegation to children
+           }
+       }
+   }
+
+4. Execution (Uniform invocation on complex hierarchical tree):
+
+   public class FileSystemDemo {
+       public static void main(String[] args) {
+           // Create Leaf nodes
+           FileSystemNode file1 = new File("Document.pdf", 2500);
+           FileSystemNode file2 = new File("Image.png", 5000);
+           FileSystemNode file3 = new File("Notes.txt", 1000);
+
+           // Create Composite nodes
+           Directory subDir = new Directory("Projects");
+           subDir.add(file3);
+
+           Directory rootDir = new Directory("Root");
+           rootDir.add(file1);
+           rootDir.add(file2);
+           rootDir.add(subDir); // Sub-directory added seamlessly as a FileSystemNode
+
+           // Uniform operation on Leaf vs Composite:
+           // Client treats a 1KB file and a nested Directory tree IDENTICALLY.
+           System.out.println("--- FILE SYSTEM TREE ---");
+           rootDir.display("");
+
+           System.out.println("\nTotal Root Directory Size: " + rootDir.getSize() + " bytes");
+           // Output: Total Root Directory Size: 8500 bytes
+       }
+   }
+
+================================================================================
+                                END OF SECTION
+================================================================================
