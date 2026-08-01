@@ -1,0 +1,117 @@
+URL Shortener System Design Document
+
+1. Requirements
+Functional:
+
+Users can pass a long URL and receive a shorter alias (e.g., tiny.url/xYz123).
+
+Clicking the short URL redirects the user to the original long URL.
+
+(Advanced) Users can specify custom aliases.
+
+(Advanced) System tracks click analytics.
+
+Non-Functional:
+
+High Availability: The redirection service (Reads) must have 99.99% uptime.
+
+Low Latency: Redirection should occur in < 50ms.
+
+Scalability: Must handle a heavy read-heavy workload (10:1 Read/Write ratio).
+
+Unpredictability: Short URLs should not be easily guessable to prevent scraping
+
+2. Back-of-the-Envelope Estimations (Scale: High)
+Traffic: Assume 100 million new URLs generated per month.
+
+Write requests (Create): 100M / (30 * 24 * 3600) ≈ 40 requests per second (RPS).
+
+Read requests (Redirect): 10:1 read-to-write ratio = 400 RPS.
+
+Storage (5 Years):
+
+100M URLs/month * 12 * 5 = 6 Billion total URLs.
+
+Assume 500 bytes per DB record (Long URL, Short URL, UserID, Timestamps).
+
+6 Billion * 500 bytes = ~3 Terabytes (TB) of storage.
+
+Memory (Cache):
+
+Cache the top 20% of daily read traffic (Pareto Principle).
+
+Daily reads: 400 RPS * 86,400 seconds ≈ 34.5 million.
+
+20% of 34.5 million = 6.9 million requests to cache.
+
+6.9 million * 500 bytes = ~3.5 Gigabytes (GB) of RAM needed for Redis/Memcached.
+
+3. Unique URL Generation (Hashing & Base62 Encoding)
+To convert a long URL into a short, unpredictable 7-character alias without maintaining a stateful Key Generation Service, the system relies on cryptographic hashing combined with Base62 encoding.
+
+A. The Generation Pipeline
+Hash the Input: Pass the original Long URL through a cryptographic hash function like MD5.
+
+Output: A fixed-length 128-bit binary number (often represented as a 32-character Hexadecimal string).
+
+Base62 Encode: Convert the entire 128-bit output into Base62 (using the alphabet [0-9, a-z, A-Z]).
+
+Why Base62? It strips out special characters like +, /, and = used in Base64, ensuring the resulting string is 100% URL-safe.
+
+Output: A ~22-character Base62 string.
+
+Truncate: Take only the first 7 characters of the resulting Base62 string to form the final Short URL.
+
+Output: A 7-character alias (e.g., 5Bq2xY8).
+
+B. Capacity and the Math of Base62
+By utilizing an alphabet of 62 characters across 7 positional slots, the total pool of unique permutations is calculated as:
+
+Total Capacity=62 
+7
+ =3,521,614,606,208≈3.52 Trillion
+Our system requires storage for roughly 365 Billion URLs over 10 years. A pool of 3.5 Trillion provides roughly 10x the required capacity, proving that 7 characters are sufficient for our scale.
+
+C. Probability of Collision (The Birthday Paradox)
+Because we are mapping a virtually infinite number of long URLs into a finite space (3.5 Trillion buckets) via truncation, collisions are inevitable.
+
+In cryptography and probability, this is governed by the Birthday Paradox, which states that the probability of a collision grows exponentially as the number of generated items increases, long before the pool is exhausted. The probability of at least one collision P is approximated by:
+
+P≈(1−e)**(-n**2/2*N) 
+ 
+Where:
+
+N = Total possible unique strings (3.52×10**12)
+
+n = Number of URLs generated
+
+If we generate just 2.2 million URLs, the probability of a collision occurring crosses 50%. At our scale of 100 million URLs per day, the mathematical probability of collisions approaches 100% almost immediately. Therefore, a robust collision resolution mechanism is a strict architectural requirement.
+
+D. Collision Resolution Strategy
+When a 7-character string is generated, the system must perform a fast lookup to verify uniqueness before writing to the database.
+
+The Bloom Filter Check: To avoid hitting the database for every single URL creation, check the newly generated 7-character string against an in-memory Bloom Filter.
+
+If the Bloom Filter says "Not Present", we guarantee there is no collision and write directly to the database.
+
+If the Bloom Filter says "Possibly Present", we query the database to verify if the alias actually exists.
+
+Handling the Collision: If the database confirms the short URL exists (and maps to a different Long URL), a collision has occurred.
+
+The Salt & Retry: The system appends a salt (e.g., [Original_URL] + [Current_Timestamp_ms] + [User_ID]) to the input.
+
+The Loop: The new salted string is pushed back through the MD5 -> Base62 -> Truncation pipeline. This results in a completely different 7-character hash. This loop repeats until a unique alias is secured.
+
+
+4. API Design
+Create Short URL
+POST /api/v1/data/shorten
+
+Payload: { "original_url": "[https://example.com/very/long/path](https://example.com/very/long/path)", "custom_alias": "my-link" }
+
+Response (201 Created): { "short_url": "[https://tiny.url/xYz123](https://tiny.url/xYz123)" }
+
+Redirect URL
+GET /:short_url
+
+Response: HTTP 302 Found with Header Location: [https://example.com/very/long/path](https://example.com/very/long/path).
