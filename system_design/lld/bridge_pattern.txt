@@ -1,0 +1,198 @@
+================================================================================
+                        BRIDGE DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: COMBINATORIAL SUBCLASS EXPLOSION ]
+When a class varies along multiple independent dimensions (e.g., Cache Types and 
+Eviction Policies), using standard inheritance forces you to create subclasses 
+for every possible combination (N x M explosion). 
+
+Creating `InMemoryLRUCache`, `InMemoryFIFOCache`, `RedisLRUCache`, `RedisFIFOCache` 
+leads to an unmanageable class hierarchy that is rigid and difficult to extend.
+
+[ SOLUTION ]
+Decouple an **Abstraction** (high-level control logic) from its **Implementation** 
+(low-level platform/strategy details) so that both can evolve independently. 
+
+Instead of inheritance, use **Composition**: the Abstraction holds a reference 
+(a "Bridge") to an Implementor interface. This reduces class growth from (N x M) 
+down to (N + M).
+
+
+--------------------------------------------------------------------------------
+ 1. BRIDGE TOPOLOGY (DECOUPLED HIERARCHIES)
+--------------------------------------------------------------------------------
+
+Client Call: `cache.put(key, value)` and `cache.get(key)`
+
+  ABSTRACTION HIERARCHY                     IMPLEMENTOR HIERARCHY
+ (High-Level Storage Logic)               (Low-Level Eviction Logic)
+
++--------------------------+  THE BRIDGE  +--------------------------+
+| Cache<K, V> (Abstract)   | -----------> | EvictionPolicy<K>        |
+| - evictionPolicy         | (Reference)  | + keyAccessed(key: K)    |
+| + get(key: K)            |              | + evictKey(): K          |
+| + put(key: K, value: V)  |              +--------------------------+
++--------------------------+                            |
+             |                                          |
+   +---------+---------+                      +---------+---------+
+   |                   |                      |                   |
++-----------------+ +-----------------+ +-----------------+ +-----------------+
+| InMemoryCache   | | RedisCache      | | LRUEviction     | | FIFOEviction    |
+| (Refined)       | | (Refined)       | | (Concrete)      | | (Concrete)      |
++-----------------+ +-----------------+ +-----------------+ +-----------------+
+
+N Cache Types + M Eviction Policies = N + M Total Classes (instead of N x M)
+
+
+--------------------------------------------------------------------------------
+ 2. SOLID PRINCIPLES: HOW BRIDGE SOLVES OCP & SRP
+--------------------------------------------------------------------------------
+
+1. Open/Closed Principle (OCP) - UPHELD
+   - New Caches (e.g., `MemcachedCache`) or new Eviction Policies (e.g., `LFUEviction`)
+     can be added independently without modifying existing classes on either side.
+
+2. Single Responsibility Principle (SRP) - UPHELD
+   - High-level data storage logic resides entirely in the Cache hierarchy.
+   - Low-level key eviction algorithms reside entirely in the EvictionPolicy hierarchy.
+
+3. Runtime Dynamic Switching
+   - Because the Implementor is held via a field reference, the concrete 
+     EvictionPolicy can be swapped dynamically at runtime if memory thresholds change.
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+// 1. Implementor Interface (Low-Level Execution Detail)
+public interface EvictionPolicy<K> {
+    void keyAccessed(K key);
+    K evictKey();
+}
+
+// 2. Concrete Implementor 1: LRU Strategy
+import java.util.*;
+
+public class LRUEvictionPolicy<K> implements EvictionPolicy<K> {
+    private final LinkedList<K> accessLog = new LinkedList<>();
+
+    @Override
+    public void keyAccessed(K key) {
+        accessLog.remove(key);
+        accessLog.addLast(key);
+    }
+
+    @Override
+    public K evictKey() {
+        if (accessLog.isEmpty()) return null;
+        K evicted = accessLog.removeFirst(); // Removes least recently used
+        System.out.println("[EvictionPolicy] Evicting LRU key: " + evicted);
+        return evicted;
+    }
+}
+
+// 3. Concrete Implementor 2: FIFO Strategy
+public class FIFOEvictionPolicy<K> implements EvictionPolicy<K> {
+    private final Queue<K> queue = new LinkedList<>();
+
+    @Override
+    public void keyAccessed(K key) {
+        if (!queue.contains(key)) {
+            queue.add(key);
+        }
+    }
+
+    @Override
+    public K evictKey() {
+        if (queue.isEmpty()) return null;
+        K evicted = queue.poll(); // Removes first inserted
+        System.out.println("[EvictionPolicy] Evicting FIFO key: " + evicted);
+        return evicted;
+    }
+}
+
+// 4. Abstraction (High-Level Operations)
+public abstract class Cache<K, V> {
+    // THE BRIDGE: Reference to the Implementor hierarchy
+    protected EvictionPolicy<K> evictionPolicy;
+    protected int capacity;
+
+    public Cache(EvictionPolicy<K> evictionPolicy, int capacity) {
+        this.evictionPolicy = evictionPolicy;
+        this.capacity = capacity;
+    }
+
+    public abstract V get(K key);
+    public abstract void put(K key, V value);
+}
+
+// 5. Refined Abstraction: In-Memory Map Cache
+public class InMemoryCache<K, V> extends Cache<K, V> {
+    private final Map<K, V> storage = new HashMap<>();
+
+    public InMemoryCache(EvictionPolicy<K> evictionPolicy, int capacity) {
+        super(evictionPolicy, capacity);
+    }
+
+    @Override
+    public V get(K key) {
+        V val = storage.get(key);
+        if (val != null) {
+            evictionPolicy.keyAccessed(key);
+        }
+        return val;
+    }
+
+    @Override
+    public void put(K key, V value) {
+        if (storage.size() >= capacity && !storage.containsKey(key)) {
+            K evictedKey = evictionPolicy.evictKey();
+            if (evictedKey != null) {
+                storage.remove(evictedKey);
+            }
+        }
+        storage.put(key, value);
+        evictionPolicy.keyAccessed(key);
+        System.out.println("[InMemoryCache] Stored key: " + key);
+    }
+}
+
+// 6. Execution (Runtime Bridge Assembly)
+public class BridgeDemo {
+    public static void main(String[] args) {
+        System.out.println("--- Scenario 1: In-Memory Cache with LRU ---");
+        Cache<String, String> lruCache = new InMemoryCache<>(new LRUEvictionPolicy<>(), 2);
+        lruCache.put("A", "Apple");
+        lruCache.put("B", "Banana");
+        lruCache.get("A");                       // Access 'A' -> Makes 'B' LRU
+        lruCache.put("C", "Cherry");              // Capacity full -> Evicts 'B'
+
+        System.out.println("\n--- Scenario 2: Same Cache with FIFO ---");
+        Cache<String, String> fifoCache = new InMemoryCache<>(new FIFOEvictionPolicy<>(), 2);
+        fifoCache.put("A", "Apple");
+        fifoCache.put("B", "Banana");
+        fifoCache.get("A");                      // Access 'A' -> FIFO ignores touch
+        fifoCache.put("C", "Cherry");             // Capacity full -> Evicts 'A'
+    }
+}
+
+
+--------------------------------------------------------------------------------
+ 4. REAL-WORLD JDK & ECOSYSTEM EXAMPLES OF BRIDGE
+--------------------------------------------------------------------------------
+
+1. JDBC Architecture (`java.sql.Driver` & `DriverManager`):
+   - **Abstraction:** Standard JDBC application code (`Connection`, `Statement`).
+   - **Implementor:** Database Drivers (`OracleDriver`, `MySQLDriver`, `PostgreSQLDriver`).
+   - You can swap underlying database drivers without changing application code.
+
+2. AWT Graphics Framework (`java.awt.Component` & `Peer`):
+   - **Abstraction:** UI components like `Button`, `Window`.
+   - **Implementor:** OS-specific peers (`UnixButtonPeer`, `WindowsButtonPeer`).
+
+
+================================================================================
+                                END OF SECTION
+================================================================================
