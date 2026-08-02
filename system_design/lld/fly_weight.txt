@@ -1,0 +1,169 @@
+================================================================================
+                        FLYWEIGHT DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: HIGH MEMORY FOOTPRINT FROM DUPLICATE OBJECTS ]
+When an application needs to instantiate thousands or millions of fine-grained 
+objects (e.g., characters in a text editor, trees in a game world, icons on a map), 
+storing duplicate data inside every single object quickly exhausts system memory, 
+leading to high RAM usage and frequent Garbage Collection pauses.
+
+[ SOLUTION ]
+Divide object state into two distinct parts:
+1. Intrinsic State: Constant, immutable data shared across many objects (e.g., font 
+   family, texture image, character type). This lives inside the **Flyweight** object.
+2. Extrinsic State: Context-dependent data unique to each instance (e.g., (X, Y) 
+   screen coordinates, color tint). This is stored externally by the client and 
+   passed to the flyweight when calling its methods.
+
+A **Flyweight Factory** maintains a pool/map of existing flyweights to ensure that 
+identical intrinsic objects are reused rather than re-instantiated.
+
+
+--------------------------------------------------------------------------------
+ 1. FLYWEIGHT TOPOLOGY (SHARED CACHE & EXTRINSIC CONTEXT)
+--------------------------------------------------------------------------------
+
+Client Call: `factory.getFlyweight(type)` -> passes extrinsic context `(x, y)`
+
++-----------------------------------------------------------------------------+
+| FlyweightFactory                                                            |
+| HashMap Cache: { "ARIAL_BOLD" -> ArialBoldFlyweightInstance }               |
+|                                                                             |
+| 1. Client asks for "ARIAL_BOLD"                                             |
+| 2. Checks cache: Found! Returns SAME instance without `new` allocation.     |
++-----------------------------------------------------------------------------+
+                                     |
+                                     v
++-----------------------------------------------------------------------------+
+| CharacterFlyweight (Shared Intrinsic State)                                 |
+| Stored Data: fontFamily = "Arial", isBold = true, glyphVectorData = [...]   |
+|                                                                             |
+| Method call: `render(int x, int y)` <--- Extrinsic State Passed At Runtime  |
++-----------------------------------------------------------------------------+
+
+Memory Saved: 100,000 character positions on screen share 1 flyweight instance!
+
+
+--------------------------------------------------------------------------------
+ 2. SOLID PRINCIPLES: HOW FLYWEIGHT SOLVES PERFORMANCE & SRP
+--------------------------------------------------------------------------------
+
+1. Single Responsibility Principle (SRP) - UPHELD
+   - The Flyweight handles shared structural data (intrinsic state).
+   - The Flyweight Factory handles object creation, pooling, and lifecycle caching.
+   - The Client handles spatial context and runtime positioning (extrinsic state).
+
+2. Immutable State Integrity
+   - Flyweight objects MUST be immutable once created. Because hundreds of clients 
+     reference the same instance, intrinsic state cannot be altered safely.
+
+3. Massive Memory Optimization
+   - Trade-off: Reduces RAM consumption drastically at the expense of minor CPU 
+     overhead (passing extrinsic context arguments to methods on every call).
+
+
+--------------------------------------------------------------------------------
+ 3. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+// 1. Flyweight Interface (Uniform Contract)
+public interface TextGlyph {
+    void draw(int x, int y); // (x, y) coordinates are EXTRINSIC state
+}
+
+// 2. Concrete Flyweight (Shared, Immutable Intrinsic State)
+public class CharacterStyleGlyph implements TextGlyph {
+    // INTRINSIC STATE (Shared & Immutable)
+    private final char character;
+    private final String fontFamily;
+    private final int fontSize;
+
+    public CharacterStyleGlyph(char character, String fontFamily, int fontSize) {
+        this.character = character;
+        this.fontFamily = fontFamily;
+        this.fontSize = fontSize;
+    }
+
+    @Override
+    public void draw(int x, int y) {
+        // Combines internal intrinsic state with external extrinsic arguments
+        System.out.println("Drawing ['" + character + "'] in " + fontFamily + " " 
+            + fontSize + "pt at coordinates (" + x + ", " + y + ")");
+    }
+}
+
+// 3. Flyweight Factory (Manages Pool / Map Cache)
+import java.util.HashMap;
+import java.util.Map;
+
+public class GlyphFactory {
+    // Cache map key -> Flyweight instance
+    private final Map<String, TextGlyph> glyphCache = new HashMap<>();
+
+    public TextGlyph getGlyph(char character, String fontFamily, int fontSize) {
+        String cacheKey = character + "_" + fontFamily + "_" + fontSize;
+
+        // Reuse existing flyweight if present; create and cache if absent
+        if (!glyphCache.containsKey(cacheKey)) {
+            glyphCache.put(cacheKey, new CharacterStyleGlyph(character, fontFamily, fontSize));
+            System.out.println("[FACTORY] Creating NEW Flyweight for key: " + cacheKey);
+        }
+
+        return glyphCache.get(cacheKey);
+    }
+
+    public int getFlyweightCount() {
+        return glyphCache.size();
+    }
+}
+
+// 4. Execution (Client Runtime Assembly)
+public class FlyweightDemo {
+    public static void main(String[] args) {
+        GlyphFactory factory = new GlyphFactory();
+
+        // Simulate rendering a long document containing repeating characters
+        System.out.println("--- Rendering Document Text ---");
+        
+        // Client manages coordinates (Extrinsic state)
+        TextGlyph char1 = factory.getGlyph('A', "Arial", 12);
+        char1.draw(0, 0);
+
+        TextGlyph char2 = factory.getGlyph('B', "Arial", 12);
+        char2.draw(10, 0);
+
+        // Requesting 'A' with same style again -> Reuses instance!
+        TextGlyph char3 = factory.getGlyph('A', "Arial", 12);
+        char3.draw(20, 0);
+
+        TextGlyph char4 = factory.getGlyph('A', "Arial", 12);
+        char4.draw(30, 0);
+
+        System.out.println("\n--- Memory Metrics ---");
+        System.out.println("Total Glyph Objects Rendered : 4");
+        System.out.println("Total Flyweights in Memory   : " + factory.getFlyweightCount());
+    }
+}
+
+
+--------------------------------------------------------------------------------
+ 4. REAL-WORLD JDK & ECOSYSTEM EXAMPLES OF FLYWEIGHT
+--------------------------------------------------------------------------------
+
+1. Java String Interning / String Pool:
+   - String literals (e.g., `"hello"`) are stored in a global JVM pool. Multiple 
+     variables pointing to `"hello"` share the exact same object reference in memory.
+
+2. Java Wrapper Class Caching (`Integer.valueOf(int)`):
+   - `Integer.valueOf(100)` reuses cached `Integer` objects for values between 
+     `-128` and `127` instead of allocating a `new Integer()` on the heap.
+
+3. GUI Font & Graphic Buffers:
+   - Game engines reuse 3D mesh and texture assets (Flyweight) while attaching 
+     different translation matrices (position, scale, rotation) for each entity.
+
+
+================================================================================
+                                END OF SECTION
+================================================================================
