@@ -1,0 +1,160 @@
+================================================================================
+                          PROXY DESIGN PATTERN
+================================================================================
+
+[ PROBLEM: DIRECT ACCESS, HEAVY CREATION & UNCONTROLLED EXECUTION ]
+Accessing an object directly can lead to critical performance and architectural 
+issues:
+1. Instantiating a heavy object up front when it might not be needed wastes 
+   memory and slows boot time.
+2. Running critical methods directly without cross-cutting controls makes it 
+   difficult to measure execution times, cache results, enforce security, or 
+   log access without polluting core domain logic.
+
+[ SOLUTION ]
+Place a surrogate or placeholder object (the `Proxy`) between the Client and the 
+Real Object (`RealSubject`). 
+
+The Proxy implements the exact same interface as the real object. It intercepts 
+all incoming calls, executes pre/post logic (such as performance metrics tracking, 
+lazy loading, caching, or access control), and forwards the request to the real 
+object only when appropriate.
+
+
+--------------------------------------------------------------------------------
+ 1. PROXY TOPOLOGY (INTERCEPTION & DELEGATION)
+--------------------------------------------------------------------------------
+
+Client Call: `service.fetchData(query)`
+
++-----------------------------------------------------------------------------+
+| PerformanceMetricsProxy (Interception Layer)                                |
+| 1. Starts execution timer: long startTime = System.currentTimeMillis()      |
+|                                                                             |
+|   +---------------------------------------------------------------------+   |
+|   | RealDataService (Target Object)                                     |   |
+|   | Executes heavy query / API fetch...                                 |   |
+|   +---------------------------------------------------------------------+   |
+|                                                                             |
+| 2. Stops timer & logs metric: executionTime = currentTime - startTime       |
++-----------------------------------------------------------------------------+
+
+Final Output : Returns data result to client + Logs performance metric to console
+
+
+--------------------------------------------------------------------------------
+ 2. SOLID PRINCIPLES: HOW PROXY SOLVES OCP & SRP
+--------------------------------------------------------------------------------
+
+1. Open/Closed Principle (OCP) - UPHELD
+   - Performance monitoring, caching, or access control can be wrapped around an 
+     existing service without modifying a single line of the service's code.
+
+2. Single Responsibility Principle (SRP) - UPHELD
+   - The real service class stays focused purely on its primary business domain.
+   - The proxy class handles cross-cutting concerns (metrics, timing, access control).
+
+3. Interface Consistency
+   - Because the Proxy implements the uniform `DataService` interface, client code 
+     is completely unaware that it is talking to a proxy rather than the real service.
+
+
+--------------------------------------------------------------------------------
+ 3. COMMON TYPES OF PROXIES
+--------------------------------------------------------------------------------
+
+1. Performance / Logging Proxy (Featured below):
+   Measures time, counts calls, and logs operations around method execution.
+
+2. Virtual Proxy (Lazy Loading):
+   Defers the creation of a resource-heavy object until the exact moment it is used.
+
+3. Protection Proxy (Access Control):
+   Checks client security credentials before allowing access to sensitive operations.
+
+4. Caching Proxy:
+   Stores execution results in memory to serve repeated calls instantly.
+
+
+--------------------------------------------------------------------------------
+ 4. IMPLEMENTATION STRUCTURE (JAVA EXAMPLE)
+--------------------------------------------------------------------------------
+
+// 1. Subject Interface (The uniform contract)
+public interface DataService {
+    String fetchData(String query);
+}
+
+// 2. Real Subject (Heavy object / Pure business logic)
+public class RealDataService implements DataService {
+    @Override
+    public String fetchData(String query) {
+        // Simulate heavy network / database operation
+        try {
+            Thread.sleep(300); // 300ms delay
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return "Data result for: [" + query + "]";
+    }
+}
+
+// 3. Performance Metrics Proxy (Intercepts calls to measure execution time)
+public class PerformanceMetricsProxy implements DataService {
+    private final DataService realDataService;
+
+    public PerformanceMetricsProxy(DataService realDataService) {
+        this.realDataService = realDataService;
+    }
+
+    @Override
+    public String fetchData(String query) {
+        long startTime = System.currentTimeMillis();
+
+        // Delegate execution to the underlying real object
+        String result = realDataService.fetchData(query);
+
+        long duration = System.currentTimeMillis() - startTime;
+        System.out.println("[METRICS LOG] Method 'fetchData' took " + duration + " ms to execute.");
+
+        return result;
+    }
+}
+
+// 4. Execution (Runtime Usage)
+public class ProxyDemo {
+    public static void main(String[] args) {
+        // Core business object
+        DataService realService = new RealDataService();
+
+        // Wrap the core object with our Performance Proxy
+        DataService serviceWithMetrics = new PerformanceMetricsProxy(realService);
+
+        // Client works through the interface transparently
+        System.out.println("--- Client Fetching Data ---");
+        String data = serviceWithMetrics.fetchData("SELECT * FROM users");
+        System.out.println("Received: " + data);
+    }
+}
+
+
+--------------------------------------------------------------------------------
+ 5. REAL-WORLD JDK & FRAMEWORK EXAMPLES OF PROXY
+--------------------------------------------------------------------------------
+
+1. Java Dynamic Proxies (`java.lang.reflect.Proxy` & `InvocationHandler`):
+   Allows runtime creation of proxy instances to dynamically intercept method calls 
+   for logging, transactions, or security profiling.
+
+2. Spring AOP (Aspect-Oriented Programming):
+   Annotating a method with `@Transactional` or `@Timed` creates a dynamic proxy 
+   around your Spring bean to capture timing metrics and manage DB transactions.
+
+3. Hibernate Lazy Loading:
+   Hibernate returns proxy entities for `@ManyToOne` relationships that only load 
+   data from the database when a getter is explicitly called.
+
+
+================================================================================
+                                END OF SECTION
+================================================================================
