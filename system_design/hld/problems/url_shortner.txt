@@ -115,3 +115,79 @@ Redirect URL
 GET /:short_url
 
 Response: HTTP 302 Found with Header Location: [https://example.com/very/long/path](https://example.com/very/long/path).
+
+4. End-to-End System Architecture
+
++--------+       +------------+       +-------------------+       +------------+       +-----------------+
+| Client | <---> | Web LB /   | <---> |    API Gateway    | <---> | Internal   | <---> | Microservices   |
+|        |       | CDN (S3)   |       | (Auth, Limits)    |       | Load Bal.  |       | (Write / Read)  |
++--------+       +------------+       +-------------------+       +------------+       +-----------------+
+                                                                                                |
+                                                                        +-----------------------+-----------------------+
+                                                                        |                                               |
+                                                                        v                                               v
+                                                            +------------------------+                      +------------------------+
+                                                            |     Write Service      |                      |      Read Service      |
+                                                            +------------------------+                      +------------------------+
+                                                                  |            |                                    |            |
+                                                      Check Bloom |            | Persist Key                        | Cache Miss | Check Cache
+                                                                  v            v                                    v            v
+                                                            +------------------------+                      +------------------------+
+                                                            |  Bloom Filter Service  |                      |      Redis Cache       |
+                                                            |  (Redis Bitset / Module|                      |     (Hot Set Keys)     |
+                                                            +------------------------+                      +------------------------+
+                                                                        |                                               |
+                                                                        +-----------------------+-----------------------+
+                                                                                                |
+                                                                                                v
+                                                                                    +------------------------+
+                                                                                    |   DynamoDB Datastore   |
+                                                                                    | (Multi-Region Global)  |
+                                                                                    +------------------------+
+
+System Components Overview
+
+* **CDN & Static Storage (Amazon S3):** Caches static assets for the frontend user interface at edge locations.
+* **API Gateway & External Load Balancer:** Single entry point managing TLS termination, authentication/authorization, rate limiting (Token Bucket algorithm), and request routing.
+* **Internal Load Balancer:** Evenly balances traffic across stateless microservice container instances.
+* **Write Service:** Handles URL generation (`POST`). Converts inputs using MD5 hashing, Base62 encoding, and 7-character truncation. Performs collision checks against the Bloom Filter, applies salting on collisions, and handles persistent writes.
+* **Read Service:** Handles redirection queries (`GET`). Checks Redis cache first for sub-5ms redirection. On cache miss, falls back to DynamoDB, returns an `HTTP 302 Found` header, and populates Redis asynchronously.
+* **Bloom Filter Service (RedisBloom):** Centralized, distributed Bloom filter holding raw key bit signatures (~7.2 GB RAM for 6B keys). Prevents database calls during collision detection on write paths with a guaranteed 0% false negative rate.
+* **In-Memory Cache (Redis Cluster):** Caches the top 20% hot read working set (~3.5 GB RAM) using a Least Recently Used (LRU) eviction policy.
+* **Datastore (Amazon DynamoDB):** Active-Active multi-region NoSQL database providing single-digit millisecond key-value lookups, managed sharding, and automated row cleanup via native Time-To-Live (TTL).
+
+Database Schema (Amazon DynamoDB)
+
+Primary Table: `url_mappings`
+
+| Attribute | Data Type | Key Structure | Description |
+| :--- | :--- | :--- | :--- |
+| **`short_key`** | String | **Partition Key (PK)** | Unique 7-character alias key (e.g., `xYz123`). |
+| **`original_url`** | String | Standard Attribute | Full destination URL string. |
+| **`user_id`** | String | Standard Attribute | Creator identifier for ownership mapping and analytics. |
+| **`created_at`** | Number | Standard Attribute | Epoch timestamp in milliseconds. |
+| **`expires_at`** | Number | **TTL Attribute** | Unix epoch timestamp for automated background row deletion. |
+
+Global Secondary Index (GSI): `user_id-created_at-index`
+
+* **Partition Key:** `user_id` (String)
+* **Sort Key:** `created_at` (Number)
+* **Projection Strategy:** `ALL`
+* **Target Query Pattern:** Fetches all URLs owned by a specific user ordered chronologically without triggering full table scans.
+
+Single-Record Payload Instance
+
+```json
+{
+  "short_key": "xYz123",
+  "original_url": "[https://example.com/very/long/nested/path/to/resource?ref=system_design](https://example.com/very/long/nested/path/to/resource?ref=system_design)",
+  "user_id": "usr_89f1a23b",
+  "created_at": 1786029104000,
+  "expires_at": 1943740704
+}
+
+HTTP Status Note (302 vs 301):
+
+301 Permanent Redirect causes client browsers to cache the mapping locally, bypassing our servers on subsequent clicks and breaking click analytics tracking.
+
+302 Found (Temporary) forces every request through our Read Service, enabling accurate click analytics logging.
