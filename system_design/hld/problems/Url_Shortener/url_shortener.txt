@@ -1,0 +1,193 @@
+URL Shortener System Design Document
+
+1. Requirements
+Functional:
+
+Users can pass a long URL and receive a shorter alias (e.g., tiny.url/xYz123).
+
+Clicking the short URL redirects the user to the original long URL.
+
+(Advanced) Users can specify custom aliases.
+
+(Advanced) System tracks click analytics.
+
+Non-Functional:
+
+High Availability: The redirection service (Reads) must have 99.99% uptime.
+
+Low Latency: Redirection should occur in < 50ms.
+
+Scalability: Must handle a heavy read-heavy workload (10:1 Read/Write ratio).
+
+Unpredictability: Short URLs should not be easily guessable to prevent scraping
+
+2. Back-of-the-Envelope Estimations (Scale: High)
+Traffic: Assume 100 million new URLs generated per month.
+
+Write requests (Create): 100M / (30 * 24 * 3600) ≈ 40 requests per second (RPS).
+
+Read requests (Redirect): 10:1 read-to-write ratio = 400 RPS.
+
+Storage (5 Years):
+
+100M URLs/month * 12 * 5 = 6 Billion total URLs.
+
+Assume 500 bytes per DB record (Long URL, Short URL, UserID, Timestamps).
+
+6 Billion * 500 bytes = ~3 Terabytes (TB) of storage.
+
+Memory (Cache):
+
+Cache the top 20% of daily read traffic (Pareto Principle).
+
+Daily reads: 400 RPS * 86,400 seconds ≈ 34.5 million.
+
+20% of 34.5 million = 6.9 million requests to cache.
+
+6.9 million * 500 bytes = ~3.5 Gigabytes (GB) of RAM needed for Redis/Memcached.
+
+3. Unique URL Generation (Hashing & Base62 Encoding)
+To convert a long URL into a short, unpredictable 7-character alias without maintaining a stateful Key Generation Service, the system relies on cryptographic hashing combined with Base62 encoding.
+
+A. The Generation Pipeline
+Hash the Input: Pass the original Long URL through a cryptographic hash function like MD5.
+
+Output: A fixed-length 128-bit binary number (often represented as a 32-character Hexadecimal string).
+
+Base62 Encode: Convert the entire 128-bit output into Base62 (using the alphabet [0-9, a-z, A-Z]).
+
+Why Base62? It strips out special characters like +, /, and = used in Base64, ensuring the resulting string is 100% URL-safe.
+
+Output: A ~22-character Base62 string.
+
+Truncate: Take only the first 7 characters of the resulting Base62 string to form the final Short URL.
+
+Output: A 7-character alias (e.g., 5Bq2xY8).
+
+B. Capacity and the Math of Base62
+By utilizing an alphabet of 62 characters across 7 positional slots, the total pool of unique permutations is calculated as:
+
+Total Capacity=62 
+7
+ =3,521,614,606,208≈3.52 Trillion
+Our system requires storage for roughly 365 Billion URLs over 10 years. A pool of 3.5 Trillion provides roughly 10x the required capacity, proving that 7 characters are sufficient for our scale.
+
+C. Probability of Collision (The Birthday Paradox)
+Because we are mapping a virtually infinite number of long URLs into a finite space (3.5 Trillion buckets) via truncation, collisions are inevitable.
+
+In cryptography and probability, this is governed by the Birthday Paradox, which states that the probability of a collision grows exponentially as the number of generated items increases, long before the pool is exhausted. The probability of at least one collision P is approximated by:
+
+P≈(1−e)**(-n**2/2*N) 
+ 
+Where:
+
+N = Total possible unique strings (3.52×10**12)
+
+n = Number of URLs generated
+
+If we generate just 2.2 million URLs, the probability of a collision occurring crosses 50%. At our scale of 100 million URLs per day, the mathematical probability of collisions approaches 100% almost immediately. Therefore, a robust collision resolution mechanism is a strict architectural requirement.
+
+D. Collision Resolution Strategy
+When a 7-character string is generated, the system must perform a fast lookup to verify uniqueness before writing to the database.
+
+The Bloom Filter Check: To avoid hitting the database for every single URL creation, check the newly generated 7-character string against an in-memory Bloom Filter.
+
+If the Bloom Filter says "Not Present", we guarantee there is no collision and write directly to the database.
+
+If the Bloom Filter says "Possibly Present", we query the database to verify if the alias actually exists.
+
+Handling the Collision: If the database confirms the short URL exists (and maps to a different Long URL), a collision has occurred.
+
+The Salt & Retry: The system appends a salt (e.g., [Original_URL] + [Current_Timestamp_ms] + [User_ID]) to the input.
+
+The Loop: The new salted string is pushed back through the MD5 -> Base62 -> Truncation pipeline. This results in a completely different 7-character hash. This loop repeats until a unique alias is secured.
+
+
+4. API Design
+Create Short URL
+POST /api/v1/data/shorten
+
+Payload: { "original_url": "[https://example.com/very/long/path](https://example.com/very/long/path)", "custom_alias": "my-link" }
+
+Response (201 Created): { "short_url": "[https://tiny.url/xYz123](https://tiny.url/xYz123)" }
+
+Redirect URL
+GET /:short_url
+
+Response: HTTP 302 Found with Header Location: [https://example.com/very/long/path](https://example.com/very/long/path).
+
+4. End-to-End System Architecture
+
++--------+       +------------+       +-------------------+       +------------+       +-----------------+
+| Client | <---> | Web LB /   | <---> |    API Gateway    | <---> | Internal   | <---> | Microservices   |
+|        |       | CDN (S3)   |       | (Auth, Limits)    |       | Load Bal.  |       | (Write / Read)  |
++--------+       +------------+       +-------------------+       +------------+       +-----------------+
+                                                                                                |
+                                                                        +-----------------------+-----------------------+
+                                                                        |                                               |
+                                                                        v                                               v
+                                                            +------------------------+                      +------------------------+
+                                                            |     Write Service      |                      |      Read Service      |
+                                                            +------------------------+                      +------------------------+
+                                                                  |            |                                    |            |
+                                                      Check Bloom |            | Persist Key                        | Cache Miss | Check Cache
+                                                                  v            v                                    v            v
+                                                            +------------------------+                      +------------------------+
+                                                            |  Bloom Filter Service  |                      |      Redis Cache       |
+                                                            |  (Redis Bitset / Module|                      |     (Hot Set Keys)     |
+                                                            +------------------------+                      +------------------------+
+                                                                        |                                               |
+                                                                        +-----------------------+-----------------------+
+                                                                                                |
+                                                                                                v
+                                                                                    +------------------------+
+                                                                                    |   DynamoDB Datastore   |
+                                                                                    | (Multi-Region Global)  |
+                                                                                    +------------------------+
+
+System Components Overview
+
+* **CDN & Static Storage (Amazon S3):** Caches static assets for the frontend user interface at edge locations.
+* **API Gateway & External Load Balancer:** Single entry point managing TLS termination, authentication/authorization, rate limiting (Token Bucket algorithm), and request routing.
+* **Internal Load Balancer:** Evenly balances traffic across stateless microservice container instances.
+* **Write Service:** Handles URL generation (`POST`). Converts inputs using MD5 hashing, Base62 encoding, and 7-character truncation. Performs collision checks against the Bloom Filter, applies salting on collisions, and handles persistent writes.
+* **Read Service:** Handles redirection queries (`GET`). Checks Redis cache first for sub-5ms redirection. On cache miss, falls back to DynamoDB, returns an `HTTP 302 Found` header, and populates Redis asynchronously.
+* **Bloom Filter Service (RedisBloom):** Centralized, distributed Bloom filter holding raw key bit signatures (~7.2 GB RAM for 6B keys). Prevents database calls during collision detection on write paths with a guaranteed 0% false negative rate.
+* **In-Memory Cache (Redis Cluster):** Caches the top 20% hot read working set (~3.5 GB RAM) using a Least Recently Used (LRU) eviction policy.
+* **Datastore (Amazon DynamoDB):** Active-Active multi-region NoSQL database providing single-digit millisecond key-value lookups, managed sharding, and automated row cleanup via native Time-To-Live (TTL).
+
+Database Schema (Amazon DynamoDB)
+
+Primary Table: `url_mappings`
+
+| Attribute | Data Type | Key Structure | Description |
+| :--- | :--- | :--- | :--- |
+| **`short_key`** | String | **Partition Key (PK)** | Unique 7-character alias key (e.g., `xYz123`). |
+| **`original_url`** | String | Standard Attribute | Full destination URL string. |
+| **`user_id`** | String | Standard Attribute | Creator identifier for ownership mapping and analytics. |
+| **`created_at`** | Number | Standard Attribute | Epoch timestamp in milliseconds. |
+| **`expires_at`** | Number | **TTL Attribute** | Unix epoch timestamp for automated background row deletion. |
+
+Global Secondary Index (GSI): `user_id-created_at-index`
+
+* **Partition Key:** `user_id` (String)
+* **Sort Key:** `created_at` (Number)
+* **Projection Strategy:** `ALL`
+* **Target Query Pattern:** Fetches all URLs owned by a specific user ordered chronologically without triggering full table scans.
+
+Single-Record Payload Instance
+
+```json
+{
+  "short_key": "xYz123",
+  "original_url": "[https://example.com/very/long/nested/path/to/resource?ref=system_design](https://example.com/very/long/nested/path/to/resource?ref=system_design)",
+  "user_id": "usr_89f1a23b",
+  "created_at": 1786029104000,
+  "expires_at": 1943740704
+}
+
+HTTP Status Note (302 vs 301):
+
+301 Permanent Redirect causes client browsers to cache the mapping locally, bypassing our servers on subsequent clicks and breaking click analytics tracking.
+
+302 Found (Temporary) forces every request through our Read Service, enabling accurate click analytics logging.
