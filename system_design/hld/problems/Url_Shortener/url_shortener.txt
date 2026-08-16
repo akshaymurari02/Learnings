@@ -196,3 +196,19 @@ Note If using Key Gen Service : then how to delete already used shortIds at scal
 to solve this we can load few percentage of keys to redis and redis responsibility is to distribute this keys in blocks to services requesting,
 and in the db it will delete in background and this process will continue.
 Or other example db block deletion is one operation as delete a row in db. 
+
+Bloom filter always checked after the cache check is done as best architectural rule.
+               [ Incoming Request: short.ly/co8XyD2 ]
+                                 │
+                                 ▼
+                     1. [ Check Data Cache (RAM) ]
+                                 │
+         ┌───────────────────────┴───────────────────────┐
+         ▼ (Cache Hit - 90% of traffic)                  ▼ (Cache Miss - Cold or Fake Link)
+   [ Return Long URL ]                               2. [ Check Bloom Filter (RAM) ]
+   (Takes ~0.1 ms)                                               │
+                                         ┌───────────────────────┴───────────────────────┐
+                                         ▼ (Says "No" - 100% Accurate)                   ▼ (Says "Maybe" - Cold Link)
+                                   [ Return 404 Not Found ]                          3. [ Direct Disk Seek (SSD) ]
+                                   (Bypasses Disk entirely)                          (Takes 1-2 ms)
+
