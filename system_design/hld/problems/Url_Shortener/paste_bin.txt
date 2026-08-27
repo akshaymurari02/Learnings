@@ -1,0 +1,199 @@
+1. Requirements
+Functional:
+
+Users can submit a block of text/code and receive a unique short URL key (e.g., pastebin.com/xYz123).
+
+Accessing the short URL retrieves and displays the original text content.
+
+(Advanced) Users can specify custom aliases, custom expiration times (TTL), or syntax highlighting preferences.
+
+(Advanced) System tracks view analytics (e.g., access count, timestamp, IP metrics).
+
+Non-Functional:
+
+High Availability: The retrieval service (Reads) must have 99.99% uptime.
+
+Low Latency: Retrieving and displaying a paste should occur in < 50ms.
+
+Scalability: Must handle a heavy read-heavy workload (10:1 Read/Write ratio).
+
+Unpredictability: Short URLs/keys should not be easily guessable to prevent scraping.
+
+Durability: Data must be reliably stored with zero data loss once paste creation is acknowledged.
+
+2. Back-of-the-Envelope Estimations (Scale: High)
+
+Traffic: Assume 100 million new pastes generated per month.
+
+Write requests (Create Paste): 100M / (30 * 24 * 3600) ≈ 40 requests per second (RPS).
+
+Read requests (View Paste): 10:1 read-to-write ratio = 400 RPS.
+
+Storage (5 Years):
+
+100M pastes/month * 12 * 5 = 6 Billion total pastes.
+
+Average paste text size = 10 Kilobytes (KB).
+
+Text Payload Storage (Object Storage / S3): 6 Billion * 10 KB = 60 Terabytes (TB).
+
+Metadata Storage (Database): 6 Billion * 500 bytes (Metadata per paste) = ~3 Terabytes (TB).
+
+Memory (Cache):
+
+Cache the top 20% of daily read traffic (Pareto Principle).
+
+Daily reads: 400 RPS * 86,400 seconds ≈ 34.5 million reads/day.
+
+20% of 34.5 million = 6.9 million paste views cached per day.
+
+6.9 million * 10 KB (Paste content + metadata) = ~69 Gigabytes (GB) of RAM needed for Redis/Memcached.
+
+
+3. Unique Key Generation (Hashing & Base62 Encoding)
+
+To convert paste metadata/content into a short, unpredictable 7-character key without maintaining a stateful Key Generation Service, the system relies on cryptographic hashing combined with Base62 encoding.
+
+A. The Generation Pipeline
+Hash the Input: Pass the Paste Content + User ID + Timestamp through a cryptographic hash function like MD5.
+
+Output: A fixed-length 128-bit binary number (32-character Hexadecimal string).
+
+Base62 Encode: Convert the entire 128-bit output into Base62 (using [0-9, a-z, A-Z]).
+
+Why Base62? Strips special characters (+, /, =), ensuring key compatibility for web URLs.
+
+Output: A ~22-character Base62 string.
+
+Truncate: Take only the first 7 characters to form the final Paste Key.
+
+Output: A 7-character alias (e.g., 5Bq2xY8).
+
+B. Capacity and the Math of Base62
+Total Capacity = 62^7 = 3,521,614,606,208 ≈ 3.52 Trillion keys.
+6 Billion pastes over 5 years is far below 3.52 Trillion, proving 7 characters provide ample head room.
+
+C. Probability of Collision (The Birthday Paradox)
+The probability of at least one collision P is approximated by:
+
+P ≈ 1 - e^(-n^2 / 2N)
+
+Where:
+N = Total possible unique strings (3.52 × 10^12)
+n = Number of generated keys
+
+At high daily write volumes, collisions will occur quickly, making collision checking mandatory.
+
+D. Collision Resolution Strategy
+Check Bloom Filter: Query an in-memory Bloom Filter with the generated 7-character key.
+
+If "Not Present", key is guaranteed unique. Proceed to write payload to S3 and metadata to DB.
+
+If "Possibly Present", query DB to verify if key exists.
+
+Collision Handling: If collision exists, append a random salt (e.g., paste payload + nanosecond timestamp), re-run MD5 -> Base62 -> Truncation until a unique key is found.
+
+
+4. API Design
+
+Create Paste
+POST /api/v1/pastes
+
+Payload: 
+{ 
+  "content": "console.log('Hello World');", 
+  "title": "Script", 
+  "syntax_highlight": "javascript", 
+  "custom_alias": "my-script", 
+  "ttl_seconds": 604800 
+}
+
+Response (201 Created): 
+{ 
+  "paste_id": "xYz123", 
+  "paste_url": "https://pastebin.com/xYz123" 
+}
+
+Get Paste
+GET /api/v1/pastes/:paste_id
+
+Response (200 OK): 
+{ 
+  "paste_id": "xYz123", 
+  "title": "Script", 
+  "content": "console.log('Hello World');", 
+  "syntax_highlight": "javascript", 
+  "created_at": 1786029104000, 
+  "expires_at": 1786633904000 
+}
+
+
+5. End-to-End System Architecture
+
++--------+        +------------+        +-------------------+        +------------+        +-----------------+
+| Client | <---> | Web LB /   | <---> |    API Gateway    | <---> | Internal   | <---> | Microservices   |
+|        |        | CDN (Cloud)|        | (Auth, Limits)    |        | Load Bal.  |        | (Write / Read)  |
++--------+        +------------+        +-------------------+        +------------+        +-----------------+
+                                                                                                    |
+                                                                        +---------------------------+---------------------------+
+                                                                        |                                                       |
+                                                                        v                                                       v
+                                                            +------------------------+                              +------------------------+
+                                                            |     Write Service      |                              |      Read Service      |
+                                                            +------------------------+                              +------------------------+
+                                                              /          |         \                                   /        |        \
+                                                  Check Bloom/           |          \ Persist S3 Object   Check Cache /         |         \ Fetch Object
+                                                            /            |           \                               /          |          \
+                                                           v             v            v                             v           v           v
+                                                    +------------+ +-----------+ +------------+              +------------+ +-----------+ +------------+
+                                                    |    Bloom   | | DynamoDB  | | Object Store|             |    Redis   | | DynamoDB  | | Object Store|
+                                                    |   Filter   | |(Metadata) | | (AWS S3)   |             |    Cache   | |(Metadata) | | (AWS S3)   |
+                                                    +------------+ +-----------+ +------------+              +------------+ +-----------+ +------------+
+
+System Components Overview
+
+* CDN (CloudFront / Cloudflare): Caches popular static frontend assets and immutable hot paste text bodies directly at edge locations.
+* API Gateway & External Load Balancer: Entry point managing TLS, rate limiting (Token Bucket), authentication, and service routing.
+* Write Service: Handles paste submission (`POST`). Stores raw text payload in AWS S3, generates 7-character key, verifies via Bloom Filter, and saves metadata into DynamoDB.
+* Read Service: Handles paste retrieval (`GET`). Checks Redis cache first (serves sub-5ms). On cache miss, fetches metadata from DynamoDB and text payload from AWS S3, populates Redis asynchronously, and returns payload to client.
+* Object Storage (Amazon S3): Primary datastore for raw paste payloads/code files. Offloads heavy blob storage from the database.
+* Metadata Datastore (Amazon DynamoDB): Holds lightweight reference metrics (`paste_id`, `s3_object_key`, owner ID, timestamps, syntax info).
+* Bloom Filter Service (RedisBloom): High-speed check for generated 7-character keys before persistent writes.
+* In-Memory Cache (Redis Cluster): Caches hot metadata and raw paste content (top 20% working set) using LRU eviction.
+
+
+Database Schema (Amazon DynamoDB - Metadata Only)
+
+Primary Table: `pastes_metadata`
+
+| Attribute | Data Type | Key Structure | Description |
+| :--- | :--- | :--- | :--- |
+| **`paste_id`** | String | **Partition Key (PK)** | Unique 7-character key (e.g., `xYz123`). |
+| **`s3_object_key`** | String | Standard Attribute | Path to text file in S3 (e.g., `pastes/2026/xYz123.txt`). |
+| **`title`** | String | Standard Attribute | User-supplied title for the paste. |
+| **`syntax_language`**| String | Standard Attribute | Language identifier for formatting (e.g., `python`, `cpp`). |
+| **`size_bytes`** | Number | Standard Attribute | Byte size of the payload. |
+| **`user_id`** | String | Standard Attribute | Creator identifier (`guest` or registered user ID). |
+| **`created_at`** | Number | Standard Attribute | Epoch timestamp in milliseconds. |
+| **`expires_at`** | Number | **TTL Attribute** | Unix epoch timestamp for automated DB row cleanup. |
+
+Global Secondary Index (GSI): `user_id-created_at-index`
+
+* Partition Key: `user_id` (String)
+* Sort Key: `created_at` (Number)
+* Projection Strategy: `ALL`
+* Purpose: Enables querying all pastes uploaded by a user ordered chronologically without full table scans.
+
+Single-Record Metadata Instance
+
+```json
+{
+  "paste_id": "xYz123",
+  "s3_object_key": "pastes/2026/08/xYz123.txt",
+  "title": "Database Cleanup Script",
+  "syntax_language": "python",
+  "size_bytes": 2048,
+  "user_id": "usr_89f1a23b",
+  "created_at": 1786029104000,
+  "expires_at": 1786633904
+}
